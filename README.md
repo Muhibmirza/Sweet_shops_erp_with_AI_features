@@ -137,6 +137,31 @@ npm run dev
 
 Environment files contain local credentials and configuration and are intentionally excluded from Git. Change seeded passwords before using the system in a real business.
 
+## ERP AI Assistant
+
+The application includes two authenticated ERP-only assistants:
+
+- **Eastern ERP Help** appears at the bottom-right and answers workflow/help questions in Urdu, Roman Urdu, Hindi, or English.
+- **ERP Agent** appears at the top-right. It can answer questions, query permission-filtered live summaries, and open authorized modules. It is read-only and never creates, edits, deletes, sells, or posts transactions.
+- Live questions use permission-filtered, read-only database summaries for sales, stock, low-stock items, top products, raw materials, kitchen balances, orders, expenses, customer/supplier balances, production, and payroll. The assistant never receives password hashes, API keys, tokens, phone numbers, or unrestricted raw database access.
+
+Groq is called only by the server, so its key is never exposed to the React client. Add these values to `server/.env` for development, or the desktop runtime environment for an installed build:
+
+```dotenv
+AI_PROVIDER="groq"
+GROQ_API_KEY="your-private-api-key"
+GROQ_CHAT_MODEL="openai/gpt-oss-20b"
+```
+
+Never commit the real key. Without a key, local ERP help and navigation remain available. AI conversations are recorded in the audit log; sensitive credentials are never included in assistant context.
+
+## v3.0 Production, Kitchen, Packaging, POS and AI
+
+- Production Orders, Recipes/BOM, Kitchen Stock, Transfers, Adjustments, and Kitchen Reports are available as sub-tabs under Production.
+- Completing a Production Order records recipe consumption against Kitchen/WIP stock, warns on shortfalls with an explicit override, adds finished stock, and creates accounting/audit records.
+- Packaging options are maintained inside each category's edit view in Settings.
+- Clicking a POS product opens a right-panel detail view for quantity presets/custom quantity, packaging, live totals, Add to Cart, and single-item token generation.
+
 ## Production Build
 
 Build the frontend and backend:
@@ -154,7 +179,7 @@ scripts\build-release.bat
 The release process produces:
 
 ```text
-desktop/release/Eastern-Sweets-Setup-<version>.exe
+desktop/release/Eastern Sweets Setup <version>.exe
 desktop/release/win-unpacked/
 desktop/release/latest.yml
 ```

@@ -60,6 +60,15 @@ export const updatePackagingType = async (req: Request, res: Response) => {
 };
 
 export const deactivatePackagingType = async (req: Request, res: Response) => {
+  const categoryId = req.query.categoryId ? String(req.query.categoryId) : '';
+  if (categoryId) {
+    const row = await prisma.$transaction(async (tx) => {
+      await tx.packagingTypeCategory.deleteMany({ where: { packagingTypeId: req.params.id, categoryId } });
+      const remaining = await tx.packagingTypeCategory.count({ where: { packagingTypeId: req.params.id } });
+      return tx.packagingType.update({ where: { id: req.params.id }, data: remaining ? {} : { isActive: false }, include: includeCategories });
+    });
+    return res.json({ success: true, data: row, message: 'Packaging option removed from category' });
+  }
   const row = await prisma.packagingType.update({ where: { id: req.params.id }, data: { isActive: false } });
   res.json({ success: true, data: row, message: 'Packaging type deactivated' });
 };

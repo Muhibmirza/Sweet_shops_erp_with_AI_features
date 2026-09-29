@@ -1,91 +1,100 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Printer, Plus } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { Plus, Printer } from 'lucide-react';
+import { useState } from 'react';
 import { api, unwrap } from '../../api/client';
 import { Modal } from '../../components/ui/Modal';
+import { queryClient } from '../../queryClient';
 import { useUiStore } from '../../store/ui';
-import type { Product, RawMaterial } from '../../types';
-import { dateTime, formatQuantity } from '../../utils/format';
-import { silentPrint } from '../../utils/print';
+import type { RawMaterial } from '../../types';
+import { formatQuantity } from '../../utils/format';
+import { printElement } from '../../utils/print';
 
-type Tab = 'stock' | 'transfers' | 'production' | 'adjustments' | 'reports';
-const now = () => new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-const initialTransfer = () => ({ rawMaterialId: '', quantity: '', transferDate: now(), receivedBy: '', notes: '' });
-const initialProduction = () => ({ productId: '', quantityProduced: '', productionDate: now(), notes: '', confirmShortfall: false });
-const initialAdjustment = () => ({ rawMaterialId: '', quantity: '', adjustType: 'WASTAGE', reason: '', adjustedAt: now() });
+export type KitchenSection = 'stock' | 'transfers' | 'adjustments' | 'reports';
 
-export default function Kitchen() {
-  const [tab, setTab] = useState<Tab>('stock');
-  const [transferOpen, setTransferOpen] = useState(false);
-  const [productionOpen, setProductionOpen] = useState(false);
-  const [adjustmentOpen, setAdjustmentOpen] = useState(false);
-  const [transfer, setTransfer] = useState(initialTransfer());
-  const [production, setProduction] = useState(initialProduction());
-  const [adjustment, setAdjustment] = useState(initialAdjustment());
-  const [shortfalls, setShortfalls] = useState<any[] | null>(null);
-  const [materialSearch, setMaterialSearch] = useState('');
+const localDateTime = () => {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 16);
+};
+
+export default function Kitchen({ section = 'stock' }: { section?: KitchenSection }) {
   const toast = useUiStore((state) => state.toast);
-  const queryClient = useQueryClient();
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [adjustmentOpen, setAdjustmentOpen] = useState(false);
+  const [transfer, setTransfer] = useState({ rawMaterialId: '', quantity: '', transferDate: localDateTime(), receivedBy: '', notes: '' });
+  const [adjustment, setAdjustment] = useState({ rawMaterialId: '', quantity: '', adjustType: 'WASTAGE', reason: '', adjustedAt: localDateTime() });
 
   const stock = useQuery({ queryKey: ['kitchen-stock'], queryFn: () => unwrap<any[]>(api.get('/api/kitchen/stock')) });
   const transfers = useQuery({ queryKey: ['kitchen-transfers'], queryFn: () => unwrap<any[]>(api.get('/api/kitchen/transfers')) });
-  const runs = useQuery({ queryKey: ['kitchen-runs'], queryFn: () => unwrap<any[]>(api.get('/api/kitchen/production-runs')) });
   const adjustments = useQuery({ queryKey: ['kitchen-adjustments'], queryFn: () => unwrap<any[]>(api.get('/api/kitchen/adjustments')) });
-  const consumption = useQuery({ queryKey: ['kitchen-consumption-report'], queryFn: () => unwrap<any[]>(api.get('/api/kitchen/reports/consumption')) });
-  const products = useQuery({ queryKey: ['products-kitchen'], queryFn: () => unwrap<Product[]>(api.get('/api/products?limit=500&isActive=true')) });
-  const materials = useQuery({ queryKey: ['raw-materials'], queryFn: () => unwrap<RawMaterial[]>(api.get('/api/raw-materials')) });
-  const recipes = useQuery({ queryKey: ['recipes-kitchen'], queryFn: () => unwrap<any[]>(api.get('/api/recipes')) });
+  const consumptionReport = useQuery({ queryKey: ['kitchen-consumption-report'], queryFn: () => unwrap<any[]>(api.get('/api/kitchen/reports/consumption')) });
+  const transferReport = useQuery({ queryKey: ['kitchen-transfer-report'], queryFn: () => unwrap<any[]>(api.get('/api/kitchen/reports/transfers')) });
+  const materials = useQuery({ queryKey: ['raw-materials-kitchen'], queryFn: () => unwrap<RawMaterial[]>(api.get('/api/raw-materials')) });
+  const selectedTransferMaterial = materials.data?.find((row) => row.id === transfer.rawMaterialId);
 
-  const invalidate = () => ['kitchen-stock', 'kitchen-transfers', 'kitchen-runs', 'kitchen-adjustments', 'kitchen-consumption-report', 'raw-materials'].forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
-  const transferMutation = useMutation({ mutationFn: () => unwrap(api.post('/api/kitchen/transfers', { ...transfer, quantity: Number(transfer.quantity) })), onSuccess: () => { toast('Stock transferred to kitchen'); setTransferOpen(false); setTransfer(initialTransfer()); invalidate(); }, onError: (error: any) => toast(error.response?.data?.message || 'Transfer failed', 'error') });
-  const productionMutation = useMutation<any, any, boolean | undefined>({
-    mutationFn: async (confirmShortfall = false) => (await api.post('/api/kitchen/production-runs', { ...production, quantityProduced: Number(production.quantityProduced), confirmShortfall })).data,
-    onSuccess: (response: any) => {
-      if (response.requiresConfirmation) { setShortfalls(response.shortfalls || []); return; }
-      toast(response.warnings?.length ? 'Production logged with stock warning' : 'Production run logged'); setShortfalls(null); setProductionOpen(false); setProduction(initialProduction()); invalidate();
+  const transferMutation = useMutation({
+    mutationFn: () => unwrap(api.post('/api/kitchen/transfers', { ...transfer, quantity: Number(transfer.quantity), unit: selectedTransferMaterial?.unit })),
+    onSuccess: () => {
+      toast('Stock transferred to kitchen');
+      setTransferOpen(false);
+      setTransfer({ rawMaterialId: '', quantity: '', transferDate: localDateTime(), receivedBy: '', notes: '' });
+      ['kitchen-stock', 'kitchen-transfers', 'kitchen-transfer-report', 'raw-materials'].forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
     },
-    onError: (error: any) => toast(error.response?.data?.message || 'Production run failed', 'error')
+    onError: (error: any) => toast(error.response?.data?.message || 'Transfer failed', 'error')
   });
-  const adjustmentMutation = useMutation({ mutationFn: () => unwrap(api.post('/api/kitchen/adjustments', { ...adjustment, quantity: undefined, kitchenAdjustmentQuantity: Number(adjustment.quantity) })), onSuccess: () => { toast('Kitchen adjustment saved'); setAdjustmentOpen(false); setAdjustment(initialAdjustment()); invalidate(); }, onError: (error: any) => toast(error.response?.data?.message || 'Adjustment failed', 'error') });
 
-  const selectedMaterial = materials.data?.find((row) => row.id === transfer.rawMaterialId);
-  const selectedRecipe = recipes.data?.find((row) => row.productId === production.productId);
-  const recipePreview = useMemo(() => {
-    if (!selectedRecipe || !Number(production.quantityProduced)) return [];
-    const scale = Number(production.quantityProduced) / Number(selectedRecipe.yieldQuantity || 1);
-    return selectedRecipe.ingredients.map((ingredient: any) => {
-      let required = Number(ingredient.quantity) * scale;
-      if (ingredient.unit === 'GRAM' && ingredient.rawMaterial.unit === 'KG') required /= 1000;
-      if (ingredient.unit === 'KG' && ingredient.rawMaterial.unit === 'GRAM') required *= 1000;
-      if (ingredient.unit === 'ML' && ingredient.rawMaterial.unit === 'LITRE') required /= 1000;
-      if (ingredient.unit === 'LITRE' && ingredient.rawMaterial.unit === 'ML') required *= 1000;
-      const available = Number(stock.data?.find((row) => row.id === ingredient.rawMaterialId)?.currentBalance || 0);
-      return { material: ingredient.rawMaterial.name, required, available, unit: ingredient.rawMaterial.unit, shortfall: Math.max(required - available, 0) };
-    });
-  }, [selectedRecipe, production.quantityProduced, stock.data]);
-  const filteredMaterials = (materials.data || []).filter((row) => row.name.toLowerCase().includes(materialSearch.toLowerCase()));
+  const adjustmentMutation = useMutation({
+    mutationFn: () => unwrap(api.post('/api/kitchen/adjustments', { ...adjustment, quantity: Number(adjustment.quantity) })),
+    onSuccess: () => {
+      toast('Kitchen adjustment saved');
+      setAdjustmentOpen(false);
+      setAdjustment({ rawMaterialId: '', quantity: '', adjustType: 'WASTAGE', reason: '', adjustedAt: localDateTime() });
+      queryClient.invalidateQueries({ queryKey: ['kitchen-stock'] });
+      queryClient.invalidateQueries({ queryKey: ['kitchen-adjustments'] });
+    },
+    onError: (error: any) => toast(error.response?.data?.message || 'Adjustment failed', 'error')
+  });
 
-  const printReport = (title: string, headings: string[], rows: Array<Array<string | number>>) => silentPrint(renderToStaticMarkup(<div className="a4-print"><h1>{title}</h1><p>Eastern Sweets — {new Date().toLocaleString()}</p><table><thead><tr>{headings.map((heading) => <th key={heading}>{heading}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>));
+  return (
+    <div className="space-y-4">
+      {section === 'stock' && <Panel title="Kitchen Stock"><Table headings={['Raw Material', 'Unit', 'Transferred In', 'Consumed', 'Adjusted', 'Current Balance']} rows={(stock.data || []).map((row) => [row.name, row.unit, formatQuantity(row.transferredIn, row.unit), formatQuantity(row.consumed, row.unit), formatQuantity(row.adjusted, row.unit), <b className={row.currentBalance < row.minStockLevel ? 'text-red-600' : 'text-emerald-700'}>{formatQuantity(row.currentBalance, row.unit)}</b>])} /></Panel>}
+      {section === 'transfers' && <Panel title="Kitchen Transfers" action={<button className="btn-primary inline-flex items-center gap-2" onClick={() => setTransferOpen(true)}><Plus size={16} /> New Transfer</button>}><Table headings={['Date', 'Material', 'Qty', 'Transferred By', 'Received By', 'Notes']} rows={(transfers.data || []).map((row) => [new Date(row.transferDate).toLocaleString(), row.rawMaterial?.name, formatQuantity(row.quantity, row.unit), row.transferredByUser?.name, row.receivedBy || '—', row.notes || '—'])} /></Panel>}
+      {section === 'adjustments' && <Panel title="Kitchen Adjustments" action={<button className="btn-primary inline-flex items-center gap-2" onClick={() => setAdjustmentOpen(true)}><Plus size={16} /> New Adjustment</button>}><Table headings={['Date', 'Material', 'Qty', 'Type', 'Reason', 'By']} rows={(adjustments.data || []).map((row) => [new Date(row.adjustedAt).toLocaleString(), row.rawMaterial?.name, <span className={row.quantity < 0 ? 'text-red-600' : 'text-emerald-700'}>{formatQuantity(row.quantity, row.rawMaterial?.unit)}</span>, row.adjustType.replaceAll('_', ' '), row.reason, row.adjustedByUser?.name])} /></Panel>}
+      {section === 'reports' && <div id="kitchen-reports-print" className="space-y-4 bg-white"><div className="flex justify-end print:hidden"><button className="btn-secondary inline-flex items-center gap-2" onClick={() => printElement('kitchen-reports-print')}><Printer size={16} /> Print Reports</button></div><Panel title="Consumption Report"><Table headings={['Date', 'Product', 'Material', 'Expected', 'Actual', 'Variance']} rows={(consumptionReport.data || []).map((row) => [new Date(row.date).toLocaleDateString(), row.product, row.material, formatQuantity(row.expected, row.unit), formatQuantity(row.actual, row.unit), formatQuantity(row.variance, row.unit)])} /></Panel><Panel title="Transfer Log"><Table headings={['Date', 'Material', 'Quantity', 'Transferred By', 'Received By']} rows={(transferReport.data || []).map((row) => [new Date(row.transferDate).toLocaleString(), row.rawMaterial?.name, formatQuantity(row.quantity, row.unit), row.transferredByUser?.name, row.receivedBy || '—'])} /></Panel></div>}
 
-  return <div className="space-y-4">
-    <div className="flex flex-wrap gap-2">{(['stock', 'transfers', 'production', 'adjustments', 'reports'] as Tab[]).map((item) => <button key={item} className={`rounded-md px-4 py-2 text-sm font-semibold capitalize ${tab === item ? 'bg-[#0f615d] text-white' : 'border bg-white'}`} onClick={() => setTab(item)}>{item === 'production' ? 'Production Runs' : item}</button>)}</div>
-    {tab === 'stock' && <Panel title="Kitchen Stock"><Table headings={['Raw Material', 'Unit', 'Transferred In', 'Consumed', 'Adjusted', 'Current Balance']} rows={(stock.data || []).map((row) => [row.name, row.unit, row.transferredIn, row.consumed, row.adjusted, <b className={row.currentBalance < row.minStockLevel ? 'text-red-600' : ''}>{formatQuantity(row.currentBalance, row.unit)}</b>])} /></Panel>}
-    {tab === 'transfers' && <Panel title="Transfer Log" action={<button className="btn-primary inline-flex items-center gap-2" onClick={() => setTransferOpen(true)}><Plus size={16} />New Transfer</button>}><Table headings={['Date', 'Material', 'Qty', 'Transferred By', 'Received By', 'Notes']} rows={(transfers.data || []).map((row) => [dateTime(row.transferDate), row.rawMaterial.name, formatQuantity(row.quantity, row.unit), row.transferredByUser.name, row.receivedBy || '-', row.notes || '-'])} /></Panel>}
-    {tab === 'production' && <Panel title="Production Runs" action={<button className="btn-primary inline-flex items-center gap-2" onClick={() => setProductionOpen(true)}><Plus size={16} />New Run</button>}><Table headings={['Date', 'Product', 'Qty Produced', 'Status', 'By']} rows={(runs.data || []).map((row) => [dateTime(row.productionDate), row.product.name, formatQuantity(row.quantityProduced, row.unit), 'Logged', row.producedByUser.name])} /></Panel>}
-    {tab === 'adjustments' && <Panel title="Adjustment Log" action={<button className="btn-primary inline-flex items-center gap-2" onClick={() => setAdjustmentOpen(true)}><Plus size={16} />New Adjustment</button>}><Table headings={['Date', 'Material', 'Qty', 'Type', 'Reason', 'By']} rows={(adjustments.data || []).map((row) => [dateTime(row.adjustedAt), row.rawMaterial.name, formatQuantity(row.quantity, row.rawMaterial.unit), row.adjustType.replaceAll('_', ' '), row.reason, row.adjustedByUser.name])} /></Panel>}
-    {tab === 'reports' && <div className="grid gap-4 xl:grid-cols-2"><Panel title="Consumption Report" action={<button className="btn-secondary inline-flex items-center gap-2" onClick={() => printReport('Kitchen Consumption Report', ['Date', 'Product', 'Material', 'Expected', 'Actual', 'Variance'], (consumption.data || []).map((row) => [dateTime(row.date), row.product, row.material, row.expected, row.actual, row.variance]))}><Printer size={16} />Print</button>}><Table headings={['Date', 'Product', 'Material', 'Expected', 'Actual', 'Variance']} rows={(consumption.data || []).map((row) => [dateTime(row.date), row.product, row.material, `${row.expected} ${row.unit}`, `${row.actual} ${row.unit}`, row.variance])} /></Panel><Panel title="Transfer Report" action={<button className="btn-secondary inline-flex items-center gap-2" onClick={() => printReport('Kitchen Transfer Report', ['Date', 'Material', 'Quantity', 'Received By'], (transfers.data || []).map((row) => [dateTime(row.transferDate), row.rawMaterial.name, `${row.quantity} ${row.unit}`, row.receivedBy || '-']))}><Printer size={16} />Print</button>}><Table headings={['Date', 'Material', 'Quantity', 'Received By']} rows={(transfers.data || []).map((row) => [dateTime(row.transferDate), row.rawMaterial.name, formatQuantity(row.quantity, row.unit), row.receivedBy || '-'])} /></Panel></div>}
+      <Modal isOpen={transferOpen} onClose={() => setTransferOpen(false)} title="New Transfer to Kitchen" size="md">
+        <form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); transferMutation.mutate(); }}>
+          <label className="grid gap-1 text-sm"><span>Raw Material *</span><select className="erp-input" required value={transfer.rawMaterialId} onChange={(event) => setTransfer({ ...transfer, rawMaterialId: event.target.value })}><option value="">Search / select material</option>{materials.data?.map((row) => <option key={row.id} value={row.id}>{row.name} — {formatQuantity(row.currentStock, row.unit)} available</option>)}</select></label>
+          <div className="grid grid-cols-2 gap-3"><label className="grid gap-1 text-sm"><span>Quantity *</span><input className="erp-input no-spinner" type="number" min="0.001" step="0.001" required value={transfer.quantity} onChange={(event) => setTransfer({ ...transfer, quantity: event.target.value })} /></label><label className="grid gap-1 text-sm"><span>Unit</span><input className="erp-input" disabled value={selectedTransferMaterial?.unit || ''} /></label></div>
+          <label className="grid gap-1 text-sm"><span>Date & Time</span><input className="erp-input" type="datetime-local" value={transfer.transferDate} onChange={(event) => setTransfer({ ...transfer, transferDate: event.target.value })} /></label>
+          <label className="grid gap-1 text-sm"><span>Received By</span><input className="erp-input" value={transfer.receivedBy} onChange={(event) => setTransfer({ ...transfer, receivedBy: event.target.value })} /></label>
+          <label className="grid gap-1 text-sm"><span>Notes</span><textarea className="erp-input" value={transfer.notes} onChange={(event) => setTransfer({ ...transfer, notes: event.target.value })} /></label>
+          <ModalButtons cancel={() => setTransferOpen(false)} pending={transferMutation.isPending} label="Transfer to Kitchen" />
+        </form>
+      </Modal>
 
-    <Modal isOpen={transferOpen} onClose={() => setTransferOpen(false)} title="Transfer to Kitchen" size="md"><form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); transferMutation.mutate(); }}><label className="grid gap-1 text-sm"><span>Search Raw Material</span><input className="erp-input" value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} placeholder="Type to filter..." /></label><label className="grid gap-1 text-sm"><span>Raw Material *</span><select className="erp-input" required value={transfer.rawMaterialId} onChange={(event) => setTransfer({ ...transfer, rawMaterialId: event.target.value })}><option value="">Select material</option>{filteredMaterials.map((row) => <option key={row.id} value={row.id}>{row.name} ({row.currentStock} {row.unit} available)</option>)}</select></label><div className="grid grid-cols-2 gap-3"><label className="grid gap-1 text-sm"><span>Quantity *</span><input className="erp-input no-spinner" required type="number" min="0.001" step="0.001" value={transfer.quantity} onChange={(event) => setTransfer({ ...transfer, quantity: event.target.value })} /></label><label className="grid gap-1 text-sm"><span>Unit</span><input className="erp-input" disabled value={selectedMaterial?.unit || ''} /></label></div><label className="grid gap-1 text-sm"><span>Date & Time *</span><input className="erp-input" type="datetime-local" required value={transfer.transferDate} onChange={(event) => setTransfer({ ...transfer, transferDate: event.target.value })} /></label><label className="grid gap-1 text-sm"><span>Received By</span><input className="erp-input" value={transfer.receivedBy} onChange={(event) => setTransfer({ ...transfer, receivedBy: event.target.value })} /></label><label className="grid gap-1 text-sm"><span>Notes</span><textarea className="erp-input" value={transfer.notes} onChange={(event) => setTransfer({ ...transfer, notes: event.target.value })} /></label><ModalButtons cancel={() => setTransferOpen(false)} pending={transferMutation.isPending} label="Transfer to Kitchen" /></form></Modal>
-
-    <Modal isOpen={productionOpen} onClose={() => setProductionOpen(false)} title="Log Production Run" size="lg"><form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); productionMutation.mutate(false); }}><label className="grid gap-1 text-sm"><span>Product *</span><select className="erp-input" required value={production.productId} onChange={(event) => setProduction({ ...production, productId: event.target.value })}><option value="">Select product</option>{products.data?.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><div className="grid grid-cols-2 gap-3"><label className="grid gap-1 text-sm"><span>Qty Produced *</span><input className="erp-input no-spinner" type="number" min="0.001" step="0.001" required value={production.quantityProduced} onChange={(event) => setProduction({ ...production, quantityProduced: event.target.value })} /></label><label className="grid gap-1 text-sm"><span>Unit</span><input className="erp-input" disabled value={selectedRecipe?.yieldUnit || products.data?.find((row) => row.id === production.productId)?.unit || ''} /></label></div><label className="grid gap-1 text-sm"><span>Production Date *</span><input className="erp-input" type="datetime-local" required value={production.productionDate} onChange={(event) => setProduction({ ...production, productionDate: event.target.value })} /></label><label className="grid gap-1 text-sm"><span>Notes</span><textarea className="erp-input" value={production.notes} onChange={(event) => setProduction({ ...production, notes: event.target.value })} /></label>{production.productId && !selectedRecipe && <div className="rounded-md bg-red-50 p-3 text-sm font-semibold text-red-700">No recipe found for this product. Set up a recipe first.</div>}{recipePreview.length > 0 && <div className="rounded-md border bg-[#fffaf0] p-3"><h3 className="mb-2 font-semibold">Recipe Preview — Will consume:</h3>{recipePreview.map((row: any) => <div key={row.material} className="flex justify-between gap-3 text-sm"><span>{row.material}: {formatQuantity(row.required, row.unit)}</span><span className={row.shortfall ? 'font-semibold text-red-600' : 'text-emerald-700'}>kitchen stock: {formatQuantity(row.available, row.unit)} {row.shortfall ? `✗ SHORTFALL: ${formatQuantity(row.shortfall, row.unit)}` : '✓'}</span></div>)}</div>}<ModalButtons cancel={() => setProductionOpen(false)} pending={productionMutation.isPending} label="Log Production Run" disabled={!selectedRecipe} /></form></Modal>
-
-    <Modal isOpen={adjustmentOpen} onClose={() => setAdjustmentOpen(false)} title="New Kitchen Adjustment" size="md"><form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); adjustmentMutation.mutate(); }}><label className="grid gap-1 text-sm"><span>Raw Material *</span><select className="erp-input" required value={adjustment.rawMaterialId} onChange={(event) => setAdjustment({ ...adjustment, rawMaterialId: event.target.value })}><option value="">Select material</option>{materials.data?.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><label className="grid gap-1 text-sm"><span>Type *</span><select className="erp-input" value={adjustment.adjustType} onChange={(event) => setAdjustment({ ...adjustment, adjustType: event.target.value })}><option value="WASTAGE">Wastage</option><option value="RETURN_TO_INVENTORY">Return to Inventory</option><option value="MANUAL_CORRECTION">Manual Correction</option></select></label><label className="grid gap-1 text-sm"><span>Quantity * {adjustment.adjustType === 'MANUAL_CORRECTION' && '(positive adds, negative removes)'}</span><input className="erp-input no-spinner" required type="number" step="0.001" value={adjustment.quantity} onChange={(event) => setAdjustment({ ...adjustment, quantity: event.target.value })} /></label><label className="grid gap-1 text-sm"><span>Reason *</span><input className="erp-input" required value={adjustment.reason} onChange={(event) => setAdjustment({ ...adjustment, reason: event.target.value })} /></label><label className="grid gap-1 text-sm"><span>Date & Time</span><input className="erp-input" type="datetime-local" value={adjustment.adjustedAt} onChange={(event) => setAdjustment({ ...adjustment, adjustedAt: event.target.value })} /></label><ModalButtons cancel={() => setAdjustmentOpen(false)} pending={adjustmentMutation.isPending} label="Save Adjustment" /></form></Modal>
-
-    <Modal isOpen={Boolean(shortfalls)} onClose={() => setShortfalls(null)} title="Insufficient Kitchen Stock" size="md"><p className="mb-3 text-sm">The production run can continue, but these materials are short:</p><div className="space-y-2">{shortfalls?.map((row) => <div key={row.rawMaterialId} className="rounded-md bg-red-50 p-3 text-sm text-red-700"><b>{row.material}</b>: required {formatQuantity(row.required, row.unit)}, available {formatQuantity(row.available, row.unit)}, shortfall {formatQuantity(row.shortfall, row.unit)}</div>)}</div><div className="mt-4 flex justify-end gap-3"><button className="btn-secondary" onClick={() => setShortfalls(null)}>Cancel</button><button className="btn-primary" onClick={() => productionMutation.mutate(true)}>Proceed Anyway</button></div></Modal>
-  </div>;
+      <Modal isOpen={adjustmentOpen} onClose={() => setAdjustmentOpen(false)} title="New Kitchen Adjustment" size="md">
+        <form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); adjustmentMutation.mutate(); }}>
+          <label className="grid gap-1 text-sm"><span>Raw Material *</span><select className="erp-input" required value={adjustment.rawMaterialId} onChange={(event) => setAdjustment({ ...adjustment, rawMaterialId: event.target.value })}><option value="">Select material</option>{materials.data?.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label>
+          <label className="grid gap-1 text-sm"><span>Type *</span><select className="erp-input" value={adjustment.adjustType} onChange={(event) => setAdjustment({ ...adjustment, adjustType: event.target.value })}><option value="WASTAGE">Wastage</option><option value="RETURN_TO_INVENTORY">Return to Inventory</option><option value="MANUAL_CORRECTION">Manual Correction</option></select></label>
+          <label className="grid gap-1 text-sm"><span>Quantity * {adjustment.adjustType === 'MANUAL_CORRECTION' && '(positive adds, negative removes)'}</span><input className="erp-input no-spinner" required type="number" step="0.001" value={adjustment.quantity} onChange={(event) => setAdjustment({ ...adjustment, quantity: event.target.value })} /></label>
+          <label className="grid gap-1 text-sm"><span>Reason *</span><input className="erp-input" required value={adjustment.reason} onChange={(event) => setAdjustment({ ...adjustment, reason: event.target.value })} /></label>
+          <label className="grid gap-1 text-sm"><span>Date & Time</span><input className="erp-input" type="datetime-local" value={adjustment.adjustedAt} onChange={(event) => setAdjustment({ ...adjustment, adjustedAt: event.target.value })} /></label>
+          <ModalButtons cancel={() => setAdjustmentOpen(false)} pending={adjustmentMutation.isPending} label="Save Adjustment" />
+        </form>
+      </Modal>
+    </div>
+  );
 }
 
-function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) { return <section className="rounded-lg border bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-lg font-semibold">{title}</h2>{action}</div>{children}</section>; }
-function Table({ headings, rows }: { headings: string[]; rows: React.ReactNode[][] }) { return <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm"><thead className="text-left text-slate-500"><tr>{headings.map((heading) => <th key={heading} className="py-2">{heading}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index} className="border-t dark:border-slate-800">{row.map((cell, cellIndex) => <td key={cellIndex} className="py-3 pr-3">{cell}</td>)}</tr>)}{!rows.length && <tr><td colSpan={headings.length} className="py-8 text-center text-slate-500">No records found.</td></tr>}</tbody></table></div>; }
-function ModalButtons({ cancel, pending, label, disabled = false }: { cancel: () => void; pending: boolean; label: string; disabled?: boolean }) { return <div className="flex justify-end gap-3"><button type="button" className="btn-secondary" onClick={cancel}>Cancel</button><button className="btn-primary" disabled={pending || disabled}>{pending ? 'Saving...' : label}</button></div>; }
+function Panel({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return <section className="rounded-lg border bg-white p-4 dark:border-slate-800 dark:bg-slate-900"><div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-lg font-semibold">{title}</h2>{action}</div>{children}</section>;
+}
+
+function Table({ headings, rows }: { headings: string[]; rows: React.ReactNode[][] }) {
+  return <div className="overflow-x-auto"><table className="w-full min-w-[720px] text-sm"><thead className="text-left text-slate-500"><tr>{headings.map((heading) => <th key={heading} className="py-2">{heading}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index} className="border-t dark:border-slate-800">{row.map((cell, cellIndex) => <td key={cellIndex} className="py-3 pr-3">{cell}</td>)}</tr>)}{!rows.length && <tr><td colSpan={headings.length} className="py-8 text-center text-slate-500">No records found.</td></tr>}</tbody></table></div>;
+}
+
+function ModalButtons({ cancel, pending, label }: { cancel: () => void; pending: boolean; label: string }) {
+  return <div className="flex justify-end gap-3"><button type="button" className="btn-secondary" onClick={cancel}>Cancel</button><button className="btn-primary" disabled={pending}>{pending ? 'Saving...' : label}</button></div>;
+}

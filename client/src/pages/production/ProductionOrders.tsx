@@ -35,6 +35,7 @@ export default function ProductionOrders() {
   const [editing, setEditing] = useState<any | null>(null);
   const [editForm, setEditForm] = useState<ProductionForm>(emptyForm());
   const [deleting, setDeleting] = useState<any | null>(null);
+  const [pendingCompletion, setPendingCompletion] = useState<{ id: string; shortfalls: any[] } | null>(null);
 
   const orders = useQuery({ queryKey: ['production-orders'], queryFn: () => unwrap<any[]>(api.get('/api/production')) });
   const recipes = useQuery({ queryKey: ['recipes-for-production'], queryFn: () => unwrap<any[]>(api.get('/api/recipes')) });
@@ -80,10 +81,21 @@ export default function ProductionOrders() {
   });
 
   const complete = useMutation({
-    mutationFn: (id: string) => unwrap(api.patch(`/api/production/${id}/complete`, {})),
-    onSuccess: () => {
+    mutationFn: async ({ id, confirmShortfall = false }: { id: string; confirmShortfall?: boolean }) => {
+      const response = await api.patch(`/api/production/${id}/complete`, { confirmShortfall });
+      return response.data;
+    },
+    onSuccess: (response: any, variables) => {
+      if (response.requiresConfirmation) {
+        setPendingCompletion({ id: variables.id, shortfalls: response.shortfalls || [] });
+        return;
+      }
+      setPendingCompletion(null);
       toast('Production order completed');
       queryClient.invalidateQueries({ queryKey: ['production-orders'] });
+      queryClient.invalidateQueries({ queryKey: ['kitchen-stock'] });
+      queryClient.invalidateQueries({ queryKey: ['kitchen-consumption-report'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
     },
     onError: (error: any) => toast(error?.response?.data?.message || 'Production order could not be completed', 'error')
   });
@@ -204,7 +216,7 @@ export default function ProductionOrders() {
                 <div><p className="text-[#6b7d78]">Date</p><b>{new Date(order.productionDate).toLocaleDateString()}</b></div>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                {order.status !== 'COMPLETED' && <button className="btn-primary" onClick={() => complete.mutate(order.id)}>Complete</button>}
+                {order.status !== 'COMPLETED' && <button className="btn-primary" disabled={complete.isPending} onClick={() => complete.mutate({ id: order.id })}>Complete</button>}
                 <button className="btn-secondary inline-flex items-center gap-2" onClick={() => printElement(`production-slip-${order.id}`)}><Printer size={16} /> Print</button>
                 {adminCanEdit && (
                   <>
@@ -232,6 +244,22 @@ export default function ProductionOrders() {
         confirmLabel="Delete"
         isLoading={remove.isPending}
       />
+      <Modal isOpen={Boolean(pendingCompletion)} onClose={() => setPendingCompletion(null)} title="Insufficient Kitchen Stock" size="md">
+        <p className="mb-3 text-sm text-[#55716d]">Kitchen stock is short for the following ingredients. You can cancel or complete the order anyway.</p>
+        <div className="space-y-2">
+          {pendingCompletion?.shortfalls.map((row) => (
+            <div key={row.rawMaterialId} className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <b>{row.material}</b>: required {formatQuantity(row.required, row.unit)}, available {formatQuantity(row.available, row.unit)}, shortfall {formatQuantity(row.shortfall, row.unit)}
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex justify-end gap-3">
+          <button className="btn-secondary" onClick={() => setPendingCompletion(null)}>Cancel</button>
+          <button className="btn-primary" disabled={complete.isPending} onClick={() => pendingCompletion && complete.mutate({ id: pendingCompletion.id, confirmShortfall: true })}>
+            {complete.isPending ? 'Completing...' : 'Proceed Anyway'}
+          </button>
+        </div>
+      </Modal>
     </section>
   );
 }

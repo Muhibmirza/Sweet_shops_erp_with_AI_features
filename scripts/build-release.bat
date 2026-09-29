@@ -5,7 +5,7 @@ echo ===================================
 echo Closing running Eastern Sweets apps...
 taskkill /F /T /IM "Eastern Sweets.exe" >nul 2>nul
 taskkill /F /T /IM "Eastern Sweets - Backup Tool.exe" >nul 2>nul
-timeout /t 2 /nobreak >nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 2"
 
 echo Cleaning locked release folders...
 if exist "desktop\release\win-unpacked" (

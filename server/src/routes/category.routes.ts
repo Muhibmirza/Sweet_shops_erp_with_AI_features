@@ -20,7 +20,7 @@ router.post('/', authorize('ADMIN'), async (req, res) => {
   res.status(201).json({ success: true, data: cat });
 });
 
-router.put('/:id', authorize('ADMIN'), async (req, res) => {
+router.put('/:id', authorize('ADMIN', 'MANAGER'), async (req, res) => {
   const cat = await prisma.category.update({ where: { id: req.params.id }, data: req.body });
   res.json({ success: true, data: cat });
 });

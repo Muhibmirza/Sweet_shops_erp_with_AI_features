@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Minus, Plus, Printer, Search, Ticket, Trash2 } from 'lucide-react';
+import { ArrowLeft, Minus, Plus, Printer, Search, Ticket, Trash2 } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { api, unwrap } from '../api/client';
 import { POSReceipt } from '../components/print/POSReceipt';
@@ -32,8 +32,6 @@ const toDisplayQuantity = (stockQuantity: number, displayUnit: Unit, productUnit
   return stockQuantity;
 };
 
-const defaultDisplayQuantity = (_product: Product) => 1;
-const defaultDisplayUnit = (product: Product): Unit => product.unit === 'KG' ? 'KG' : product.unit;
 const stepForUnit = (unit: Unit) => unit === 'GRAM' ? 50 : unit === 'KG' || unit === 'LITRE' ? 0.25 : 1;
 
 export default function POS() {
@@ -50,12 +48,22 @@ export default function POS() {
   const [lastSale, setLastSale] = useState<Sale | null>(null);
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [tokenNumber, setTokenNumber] = useState('');
-  const [customQuantities, setCustomQuantities] = useState<Record<string, string>>({});
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [detailQuantity, setDetailQuantity] = useState(1);
+  const [detailInputMode, setDetailInputMode] = useState<'g' | 'kg'>('g');
+  const [detailCustomQuantity, setDetailCustomQuantity] = useState('');
+  const [detailPackagingId, setDetailPackagingId] = useState<string | null>(null);
+  const [detailTokenOpen, setDetailTokenOpen] = useState(false);
 
   const products = useQuery({ queryKey: ['products'], queryFn: () => unwrap<Product[]>(api.get('/api/products?limit=200&isActive=true')) });
   const categories = useQuery({ queryKey: ['categories'], queryFn: () => unwrap<Category[]>(api.get('/api/categories')) });
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => unwrap<any>(api.get('/api/settings')) });
   const nextToken = useQuery({ queryKey: ['next-token'], queryFn: () => unwrap<{ nextNumber: number }>(api.get('/api/tokens/counter/next')) });
+  const detailPackaging = useQuery({
+    queryKey: ['packaging-for-category', selectedProduct?.categoryId],
+    queryFn: () => unwrap<PackagingType[]>(api.get(`/api/packaging-types/for-category/${selectedProduct!.categoryId}`)),
+    enabled: Boolean(selectedProduct)
+  });
 
   const filtered = useMemo(() => {
     return (products.data || []).filter((product) => {
@@ -78,37 +86,71 @@ export default function POS() {
     return Math.round(type.extraCharge);
   };
 
-  const add = async (product: Product, requestedQuantity?: number) => {
-    if (!product.currentCost || product.currentCost <= 0) {
-      toast('Cost not set yet; sale will continue with zero cost', 'error');
-    }
+  const openProductDetail = (product: Product) => {
+    if (!product.currentCost || product.currentCost <= 0) toast('Cost not set yet; sale will continue with zero cost', 'error');
     if (product.currentStock <= 0) {
       toast(`${product.name} is out of stock`, 'error');
       return;
     }
-    let packagingOptions: PackagingType[] = [];
-    try {
-      packagingOptions = (await unwrap<PackagingType[]>(api.get(`/api/packaging-types/for-category/${product.categoryId}`))).filter((option) => option.id);
-    } catch {
-      toast('Packaging options could not be loaded; No Packaging selected', 'error');
+    const initial = product.saleMode === 'WEIGHT' ? Number((product.quantityPresets?.[0] || 250) / 1000) : 1;
+    setSelectedProduct(product);
+    setDetailQuantity(initial);
+    setDetailInputMode('g');
+    setDetailCustomQuantity('');
+    setDetailPackagingId(null);
+    setDetailTokenOpen(false);
+    setTokenNumber('');
+  };
+
+  const detailOptions = (detailPackaging.data || []).filter((option) => option.id);
+  const selectedDetailPackaging = detailOptions.find((option) => option.id === detailPackagingId);
+  const detailItemTotal = selectedProduct ? Math.round(selectedProduct.sellingPrice * detailQuantity) : 0;
+  const detailPackagingCharge = packagingChargeFor(selectedDetailPackaging, detailQuantity, detailItemTotal);
+  const detailLine: CartLine | null = selectedProduct ? {
+    product: selectedProduct,
+    quantity: detailQuantity,
+    displayQuantity: selectedProduct.saleMode === 'WEIGHT' && detailQuantity < 1 ? detailQuantity * 1000 : detailQuantity,
+    displayUnit: selectedProduct.saleMode === 'WEIGHT' && detailQuantity < 1 ? 'GRAM' : selectedProduct.unit,
+    unitPrice: selectedProduct.sellingPrice,
+    lineTotal: detailItemTotal,
+    packagingOptions: detailOptions,
+    packagingTypeId: detailPackagingId,
+    packagingCharge: detailPackagingCharge
+  } : null;
+
+  const setDetailCustom = (value: string) => {
+    setDetailCustomQuantity(value);
+    const raw = Number(value);
+    setDetailQuantity(raw > 0 ? (detailInputMode === 'g' ? raw / 1000 : raw) : 0);
+  };
+
+  const validateDetail = () => {
+    if (!selectedProduct || !detailLine || detailQuantity <= 0) {
+      toast('Quantity must be greater than zero', 'error');
+      return false;
     }
+    if (detailQuantity > selectedProduct.currentStock) {
+      toast(`Only ${formatQuantity(selectedProduct.currentStock, selectedProduct.unit)} available`, 'error');
+      return false;
+    }
+    return true;
+  };
+
+  const addDetailToCart = () => {
+    if (!validateDetail() || !detailLine) return;
     setCart((current) => {
-      const existing = current.find((line) => line.product.id === product.id);
-      if (existing) {
-        const nextStockQuantity = requestedQuantity !== undefined ? existing.quantity + requestedQuantity : existing.quantity + toStockQuantity(stepForUnit(existing.displayUnit), existing.displayUnit, product.unit);
-        const nextDisplayQuantity = toDisplayQuantity(nextStockQuantity, existing.displayUnit, product.unit);
-        if (nextStockQuantity > product.currentStock) {
-          toast(`Only ${formatQuantity(product.currentStock, product.unit)} available`, 'error');
-          return current;
-        }
-        return current.map((line) => line.product.id === product.id ? { ...line, packagingOptions, quantity: nextStockQuantity, displayQuantity: nextDisplayQuantity, lineTotal: Math.round(line.unitPrice * nextStockQuantity), packagingCharge: packagingChargeFor(line.packagingOptions.find((x) => x.id === line.packagingTypeId), nextStockQuantity, Math.round(line.unitPrice * nextStockQuantity)) } : line);
+      const existing = current.find((line) => line.product.id === detailLine.product.id && line.packagingTypeId === detailLine.packagingTypeId);
+      if (!existing) return [...current, detailLine];
+      const quantity = existing.quantity + detailLine.quantity;
+      if (quantity > detailLine.product.currentStock) {
+        toast(`Only ${formatQuantity(detailLine.product.currentStock, detailLine.product.unit)} available`, 'error');
+        return current;
       }
-      const initialQuantity = requestedQuantity ?? defaultDisplayQuantity(product);
-      const displayUnit: Unit = product.saleMode === 'WEIGHT' && initialQuantity < 1 ? 'GRAM' : defaultDisplayUnit(product);
-      const displayQuantity = toDisplayQuantity(initialQuantity, displayUnit, product.unit);
-      const quantity = Math.min(toStockQuantity(displayQuantity, displayUnit, product.unit), product.currentStock);
-      return [...current, { product, quantity, displayQuantity: toDisplayQuantity(quantity, displayUnit, product.unit), displayUnit, unitPrice: product.sellingPrice, lineTotal: Math.round(product.sellingPrice * quantity), packagingOptions, packagingTypeId: null, packagingCharge: 0 }];
+      const lineTotal = Math.round(existing.unitPrice * quantity);
+      return current.map((line) => line === existing ? { ...line, quantity, displayQuantity: toDisplayQuantity(quantity, line.displayUnit, line.product.unit), lineTotal, packagingCharge: packagingChargeFor(line.packagingOptions.find((option) => option.id === line.packagingTypeId), quantity, lineTotal) } : line);
     });
+    setSelectedProduct(null);
+    toast(`${detailLine.product.name} added to cart`);
   };
 
   const updatePackaging = (productId: string, packagingTypeId: string) => setCart((current) => current.map((line) => {
@@ -191,8 +233,8 @@ export default function POS() {
     setTokenNumber('');
   };
 
-  const buildSalePayload = (override?: { tokenNumber?: number }) => ({
-    items: payableLines.map((line) => ({
+  const buildSalePayload = (override?: { tokenNumber?: number; lines?: CartLine[] }) => ({
+    items: (override?.lines || payableLines).map((line) => ({
       productId: line.product.id,
       quantity: line.quantity,
       displayQuantity: line.displayQuantity,
@@ -200,18 +242,18 @@ export default function POS() {
       unitPrice: line.quantity > 0 ? line.lineTotal / line.quantity : line.unitPrice,
       packagingTypeId: line.packagingTypeId
     })),
-    discount,
+    discount: override?.lines ? 0 : discount,
     taxAmount: 0,
     paymentMethod,
     cashReceived: paymentMethod === 'CASH' ? cashReceived : undefined,
-    isDelivery,
-    deliveryCharges: deliveryTotal,
+    isDelivery: override?.lines ? false : isDelivery,
+    deliveryCharges: override?.lines ? 0 : deliveryTotal,
     tokenNumber: override?.tokenNumber
   });
 
-  const buildTokenSlipData = (finalTokenNumber: number) => ({
+  const buildTokenSlipData = (finalTokenNumber: number, lines: CartLine[] = payableLines) => ({
     tokenNumber: finalTokenNumber,
-    items: payableLines.map((line) => ({
+    items: lines.map((line) => ({
       productId: line.product.id,
       product: line.product,
       name: line.product.name,
@@ -224,14 +266,14 @@ export default function POS() {
       packagingCharge: line.packagingCharge,
       packagingType: line.packagingOptions.find((option) => option.id === line.packagingTypeId) || null
     })),
-    totalAmount: subtotal,
+    totalAmount: lines.reduce((sum, line) => sum + line.lineTotal + line.packagingCharge, 0),
     createdAt: new Date()
   });
 
   const saleMutation = useMutation({
-    mutationFn: (payload?: { tokenNumber?: number; tokenSlip?: any }) =>
+    mutationFn: (payload?: { tokenNumber?: number; tokenSlip?: any; lines?: CartLine[] }) =>
       unwrap<Sale>(
-        api.post('/api/sales', buildSalePayload({ tokenNumber: payload?.tokenNumber }))
+        api.post('/api/sales', buildSalePayload({ tokenNumber: payload?.tokenNumber, lines: payload?.lines }))
       ),
     onSuccess: (sale, payload) => {
       setLastSale(sale);
@@ -242,6 +284,7 @@ export default function POS() {
         toast(`Sale completed! Invoice: ${sale.invoiceNo}`);
       }
       clearCart();
+      setSelectedProduct(null);
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       queryClient.invalidateQueries({ queryKey: ['revenue'] });
@@ -256,6 +299,13 @@ export default function POS() {
     const finalTokenNumber = Number(tokenNumber || nextToken.data?.nextNumber || 1);
     if (!payableLines.length || !finalTokenNumber || finalTokenNumber <= 0) return;
     saleMutation.mutate({ tokenNumber: finalTokenNumber, tokenSlip: buildTokenSlipData(finalTokenNumber) });
+  };
+
+  const submitDetailTokenSale = () => {
+    if (!validateDetail() || !detailLine) return;
+    const finalTokenNumber = Number(tokenNumber || nextToken.data?.nextNumber || 1);
+    if (!finalTokenNumber || finalTokenNumber <= 0) return;
+    saleMutation.mutate({ tokenNumber: finalTokenNumber, lines: [detailLine], tokenSlip: buildTokenSlipData(finalTokenNumber, [detailLine]) });
   };
 
   return (
@@ -273,8 +323,11 @@ export default function POS() {
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5">
           {filtered.map((product) => (
-            <div
+            <button
+              type="button"
               key={product.id}
+              disabled={product.currentStock <= 0}
+              onClick={() => openProductDetail(product)}
               className="min-h-36 rounded-lg border bg-white p-3 text-left shadow-sm transition hover:border-orange-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-800 dark:bg-slate-900"
             >
               <div className="flex h-full flex-col justify-between">
@@ -288,15 +341,35 @@ export default function POS() {
                   <div className={`text-xs ${product.currentStock <= product.minStockLevel ? 'text-red-600' : 'text-slate-500'}`}>
                     {formatQuantity(product.currentStock, product.unit)} available
                   </div>
-                  {product.saleMode === 'WEIGHT' ? <div className="mt-2 flex flex-wrap gap-1">{(product.quantityPresets?.length ? product.quantityPresets : [250, 500, 750, 1000]).map((grams) => <button type="button" key={grams} disabled={product.currentStock <= 0 || grams / 1000 > product.currentStock} onClick={() => add(product, grams / 1000)} className="rounded bg-[#0f615d] px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-40">{grams >= 1000 ? `${grams / 1000}kg` : `${grams}g`}</button>)}<div className="mt-1 flex w-full gap-1"><input type="number" min="1" step="1" value={customQuantities[product.id] || ''} onChange={(event) => setCustomQuantities((current) => ({ ...current, [product.id]: event.target.value }))} placeholder="Custom (g)" className="w-20 rounded border px-1 py-1 text-[11px]" /><button type="button" className="rounded bg-orange-600 px-2 py-1 text-[11px] font-semibold text-white" onClick={() => { const grams = Number(customQuantities[product.id]); if (grams > 0) add(product, grams / 1000); }}>Add</button></div></div> : <button type="button" disabled={product.currentStock <= 0} onClick={() => add(product)} className="mt-2 w-full rounded bg-[#0f615d] px-2 py-1 text-xs font-semibold text-white disabled:opacity-40">Add</button>}
+                  <div className="mt-2 rounded bg-[#0f615d] px-2 py-1 text-center text-xs font-semibold text-white">Select</div>
                 </div>
               </div>
-            </div>
+            </button>
           ))}
         </div>
       </section>
 
       <aside className="rounded-lg border bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        {selectedProduct && detailLine ? (
+          <div className="animate-in slide-in-from-right-4 space-y-5 duration-200">
+            <button type="button" className="inline-flex min-h-11 items-center gap-2 font-semibold text-[#0f615d]" onClick={() => setSelectedProduct(null)}><ArrowLeft size={18} /> Back to Cart</button>
+            <div><h2 className="font-serif text-2xl font-bold uppercase text-[#0f615d]">{selectedProduct.name}</h2><p className="text-lg font-semibold text-orange-600">{pkr(selectedProduct.sellingPrice)} / {selectedProduct.saleMode === 'WEIGHT' ? 'kg' : selectedProduct.unit.toLowerCase()}</p><p className={`mt-1 text-sm ${selectedProduct.currentStock <= selectedProduct.minStockLevel ? 'text-red-600' : 'text-slate-500'}`}>Stock: {formatQuantity(selectedProduct.currentStock, selectedProduct.unit)} available</p></div>
+
+            <section className="border-t pt-4"><h3 className="mb-3 font-semibold">Select Quantity</h3>
+              {selectedProduct.saleMode === 'WEIGHT' ? <>
+                <div className="grid grid-cols-4 gap-2">{(selectedProduct.quantityPresets?.length ? selectedProduct.quantityPresets : [250, 500, 750, 1000, 1500, 2000]).map((grams) => <button type="button" key={grams} disabled={grams / 1000 > selectedProduct.currentStock} className={`min-h-11 rounded-md border text-sm font-semibold ${Math.abs(detailQuantity - grams / 1000) < 0.000001 ? 'border-[#0f615d] bg-[#0f615d] text-white' : 'border-[#dac197] bg-[#fffaf0] text-[#0f615d]'}`} onClick={() => { setDetailQuantity(grams / 1000); setDetailCustomQuantity(''); }}>{grams >= 1000 ? `${grams / 1000}kg` : `${grams}g`}</button>)}</div>
+                <div className="mt-3 flex items-center gap-2"><span className="text-sm font-semibold">Custom:</span><input className="erp-input no-spinner min-w-0 flex-1" type="number" min="0" step={detailInputMode === 'g' ? 1 : 0.001} value={detailCustomQuantity} onChange={(event) => setDetailCustom(event.target.value)} placeholder={detailInputMode === 'g' ? 'grams' : 'kilograms'} /><div className="flex rounded-md border"><button type="button" className={`h-11 px-3 text-sm font-semibold ${detailInputMode === 'g' ? 'bg-[#0f615d] text-white' : ''}`} onClick={() => { setDetailInputMode('g'); setDetailCustomQuantity(''); }}>g</button><button type="button" className={`h-11 px-3 text-sm font-semibold ${detailInputMode === 'kg' ? 'bg-[#0f615d] text-white' : ''}`} onClick={() => { setDetailInputMode('kg'); setDetailCustomQuantity(''); }}>kg</button></div></div>
+              </> : <div className="flex items-center gap-3"><button type="button" className="touch rounded-md border" onClick={() => setDetailQuantity(Math.max(1, detailQuantity - 1))}><Minus size={18} /></button><span className="min-w-12 text-center text-xl font-bold">{detailQuantity}</span><button type="button" className="touch rounded-md border disabled:opacity-40" disabled={detailQuantity >= selectedProduct.currentStock} onClick={() => setDetailQuantity(detailQuantity + 1)}><Plus size={18} /></button><span className="text-sm text-slate-500">sold by piece/unit</span></div>}
+            </section>
+
+            <section className="border-t pt-4"><h3 className="mb-3 font-semibold">Packaging</h3><div className="space-y-2"><label className="flex min-h-10 cursor-pointer items-center justify-between rounded-md border px-3"><span className="flex items-center gap-2"><input type="radio" name="detail-packaging" checked={!detailPackagingId} onChange={() => setDetailPackagingId(null)} /> No Packaging</span><span>{pkr(0)}</span></label>{detailOptions.map((option) => <label key={option.id} className="flex min-h-10 cursor-pointer items-center justify-between rounded-md border px-3"><span className="flex items-center gap-2"><input type="radio" name="detail-packaging" checked={detailPackagingId === option.id} onChange={() => setDetailPackagingId(option.id)} /> {option.name}</span><span>+{option.chargeType === 'PERCENTAGE' ? `${option.extraCharge}%` : `${pkr(option.extraCharge)}${option.chargeType === 'PER_KG' ? '/kg' : ''}`}</span></label>)}</div></section>
+
+            <section className="space-y-2 border-y py-4 text-sm"><div className="flex justify-between"><span>Qty</span><b>{formatQuantity(detailLine.displayQuantity, detailLine.displayUnit)}</b></div><div className="flex justify-between"><span>Rate</span><b>{pkr(detailLine.unitPrice)} / {selectedProduct.saleMode === 'WEIGHT' ? 'kg' : selectedProduct.unit.toLowerCase()}</b></div><div className="flex justify-between"><span>Item Total</span><b>{pkr(detailItemTotal)}</b></div><div className="flex justify-between"><span>Packaging</span><b>{pkr(detailPackagingCharge)}</b></div><div className="flex justify-between text-lg font-bold text-[#0f615d]"><span>LINE TOTAL</span><span>{pkr(detailItemTotal + detailPackagingCharge)}</span></div>{detailQuantity > selectedProduct.currentStock && <p className="text-right font-semibold text-red-600">Only {formatQuantity(selectedProduct.currentStock, selectedProduct.unit)} available</p>}</section>
+
+            <div className="grid grid-cols-2 gap-2"><button type="button" className="btn-primary" disabled={detailQuantity <= 0 || detailQuantity > selectedProduct.currentStock} onClick={addDetailToCart}>Add to Cart</button><button type="button" className="touch inline-flex items-center justify-center gap-2 rounded-md border border-blue-300 font-semibold text-blue-700 disabled:opacity-40" disabled={detailQuantity <= 0 || detailQuantity > selectedProduct.currentStock || saleMutation.isPending} onClick={() => { setTokenNumber(String(nextToken.data?.nextNumber || '')); setDetailTokenOpen(true); }}><Ticket size={16} /> Generate Token</button></div>
+            {detailTokenOpen && <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2"><span className="text-sm font-semibold text-blue-700">Token No:</span><input type="number" autoFocus value={tokenNumber} onChange={(event) => setTokenNumber(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitDetailTokenSale(); }} className="h-10 w-20 rounded border border-blue-300 bg-white px-2 text-center text-lg font-bold outline-none" /><button type="button" className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white" disabled={saleMutation.isPending} onClick={submitDetailTokenSale}>Print</button><button type="button" className="px-2 text-sm font-semibold text-slate-500" onClick={() => setDetailTokenOpen(false)}>Cancel</button></div>}
+          </div>
+        ) : <>
         <h2 className="mb-3 text-lg font-semibold">Cart</h2>
         <div className="max-h-[42vh] space-y-2 overflow-auto pr-1">
           {cart.map((line) => (
@@ -403,6 +476,7 @@ export default function POS() {
             </div>
           )}
         </div>
+        </>}
       </aside>
     </div>
   );

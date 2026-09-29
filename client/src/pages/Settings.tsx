@@ -11,6 +11,7 @@ import { useUiStore } from '../store/ui';
 import { useAuthStore } from '../store/auth';
 import type { Category, Role, User } from '../types';
 import { canEditDelete } from '../utils/permissions';
+import PackagingTypes from './settings/PackagingTypes';
 
 const roleBadgeClasses: Record<Role, string> = {
   ADMIN: 'bg-red-50 text-red-700 border-red-200',
@@ -44,7 +45,7 @@ export default function Settings() {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => unwrap<any>(api.get('/api/settings')) });
   const categories = useQuery({ queryKey: ['categories'], queryFn: () => unwrap<Category[]>(api.get('/api/categories')) });
-  const users = useQuery({ queryKey: ['settings-users'], queryFn: () => unwrap<User[]>(api.get('/api/settings/users')) });
+  const users = useQuery({ queryKey: ['settings-users'], queryFn: () => unwrap<User[]>(api.get('/api/settings/users')), enabled: user?.role === 'ADMIN' });
   const shopForm = useForm({ values: settings.data || { shopName: 'Eastern Sweets', address: 'Eastern Sweets, Bakers & Nimco', phone: '', city: 'Pakistan', taxRate: 0 } });
   const categoryForm = useForm({ defaultValues: { name: '', type: 'SWEET', description: '' } });
   const editCategoryForm = useForm({ values: categoryToEdit || { name: '', type: 'SWEET', description: '' } });
@@ -140,7 +141,7 @@ export default function Settings() {
   };
   return (
     <div className="space-y-5">
-      <section className="rounded-lg border bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+      {user?.role === 'ADMIN' && <section className="rounded-lg border bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="font-semibold">App Updates</h2>
@@ -152,7 +153,7 @@ export default function Settings() {
             {checkingUpdates ? 'Checking...' : 'Check for Updates'}
           </button>
         </div>
-      </section>
+      </section>}
       <section className="rounded-lg border bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -288,7 +289,7 @@ export default function Settings() {
         </div>
       </section>
 
-      <Modal isOpen={Boolean(categoryToEdit)} onClose={() => setCategoryToEdit(null)} title={`Edit ${categoryToEdit?.name || 'Category'}`}>
+      <Modal isOpen={Boolean(categoryToEdit)} onClose={() => setCategoryToEdit(null)} title={`Edit ${categoryToEdit?.name || 'Category'}`} size="xl">
         <form className="grid gap-3" onSubmit={editCategoryForm.handleSubmit((data) => updateCategory.mutate(data))}>
           <input className="erp-input" placeholder="Category name" {...editCategoryForm.register('name', { required: true })} />
           <select className="erp-input" {...editCategoryForm.register('type')}>
@@ -297,6 +298,7 @@ export default function Settings() {
           <textarea className="erp-input" placeholder="Description" {...editCategoryForm.register('description')} />
           <div className="flex justify-end gap-3"><button type="button" className="btn-secondary" onClick={() => setCategoryToEdit(null)}>Cancel</button><button className="btn-primary" disabled={updateCategory.isPending}>{updateCategory.isPending ? 'Saving...' : 'Save'}</button></div>
         </form>
+        {categoryToEdit && categoryToEdit.type !== 'RAW_MATERIAL' && <PackagingTypes category={categoryToEdit} />}
       </Modal>
       <ConfirmModal
         isOpen={Boolean(categoryToDelete)}

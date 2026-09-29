@@ -231,7 +231,7 @@ export const createProductionEntry = (productionId: string, rawMaterialCost: num
   const overheadCost = Math.max(0, Number(finishedGoodsCost || 0) - Number(rawMaterialCost || 0));
   const lines: Array<{ code: string; debit?: number; credit?: number; description?: string }> = [
     { code: '1101', debit: finishedGoodsCost, description: 'Finished goods inventory' },
-    { code: '1100', credit: rawMaterialCost, description: 'Raw material consumed' }
+    { code: '1102', credit: rawMaterialCost, description: 'Kitchen / WIP materials consumed' }
   ];
   if (overheadCost > 0) {
     lines.push({ code: '5002', credit: overheadCost, description: 'Production overhead capitalized' });

@@ -5,6 +5,7 @@ const waitOn = require('wait-on');
 const os = require('os');
 const fs = require('fs');
 const http = require('http');
+const net = require('net');
 const { autoUpdater } = require('electron-updater');
 
 if (!electron.app) {
@@ -26,8 +27,9 @@ let backendStarting = false;
 let healthTimer = null;
 let consecutiveHealthFailures = 0;
 
-const SERVER_PORT = Number(process.env.PORT || 5000);
-const SERVER_URL = `http://localhost:${SERVER_PORT}`;
+const PREFERRED_SERVER_PORT = Number(process.env.PORT || 5000);
+let SERVER_PORT = PREFERRED_SERVER_PORT;
+let SERVER_URL = `http://localhost:${SERVER_PORT}`;
 let logFile = '';
 
 autoUpdater.autoDownload = false;
@@ -45,6 +47,13 @@ app.on('second-instance', () => {
     mainWindow.show();
     mainWindow.focus();
   }
+  checkBackendHealth().then((ok) => {
+    if (!ok) {
+      writeLog('Second launch detected a stopped backend; restarting it');
+      startBackendServer();
+      waitForBackendAndLoad();
+    }
+  });
 });
 
 function writeLog(message) {
@@ -123,9 +132,34 @@ function serverSecrets() {
   }
   values.DATABASE_URL = serverDatabaseUrl();
   values.CLIENT_URL = SERVER_URL;
+  values.AI_PROVIDER = 'groq';
+  if (process.env.GROQ_API_KEY) values.GROQ_API_KEY = process.env.GROQ_API_KEY;
+  if (!values.GROQ_CHAT_MODEL) values.GROQ_CHAT_MODEL = process.env.GROQ_CHAT_MODEL || 'openai/gpt-oss-20b';
   fs.mkdirSync(path.dirname(envPath), { recursive: true });
   fs.writeFileSync(envPath, Object.entries(values).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join('\n') + '\n', { mode: 0o600 });
   return values;
+}
+
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const tester = net.createServer();
+    tester.unref();
+    tester.once('error', () => resolve(false));
+    tester.listen({ host: '127.0.0.1', port }, () => tester.close(() => resolve(true)));
+  });
+}
+
+async function selectServerPort() {
+  for (let offset = 0; offset < 20; offset += 1) {
+    const candidate = PREFERRED_SERVER_PORT + offset;
+    if (await isPortAvailable(candidate)) {
+      SERVER_PORT = candidate;
+      SERVER_URL = `http://localhost:${candidate}`;
+      writeLog(`Selected local server port ${candidate}`);
+      return;
+    }
+  }
+  throw new Error(`No free local server port found from ${PREFERRED_SERVER_PORT} to ${PREFERRED_SERVER_PORT + 19}`);
 }
 
 function checkBackendHealth(timeoutMs = 2500) {
@@ -142,9 +176,25 @@ function checkBackendHealth(timeoutMs = 2500) {
   });
 }
 
+function checkFrontendReady(timeoutMs = 3500) {
+  return new Promise((resolve) => {
+    const request = http.get(`${SERVER_URL}/`, { timeout: timeoutMs }, (response) => {
+      const contentType = String(response.headers['content-type'] || '');
+      response.resume();
+      resolve(response.statusCode === 200 && contentType.includes('text/html'));
+    });
+    request.on('timeout', () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.on('error', () => resolve(false));
+  });
+}
+
 async function waitForBackendAndLoad() {
   try {
     await waitOn({ resources: [`${SERVER_URL}/api/health`], timeout: 45000 });
+    if (!(await checkFrontendReady())) throw new Error('Frontend files are not being served by the local backend');
     writeLog('Eastern Sweets server is ready');
     showStartupStatus('Opening Eastern Sweets...');
     if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(SERVER_URL);
@@ -208,8 +258,7 @@ function startBackendServer() {
     writeLog(`Backend server exited with code ${code}`);
     if (!isQuitting) {
       showStartupStatus(`Backend server restarted automatically. Log: ${logFile}`);
-      startBackendServer();
-      waitForBackendAndLoad();
+      scheduleBackendRestart('process exit');
     }
   });
 }
@@ -543,6 +592,14 @@ ipcMain.handle('silent-print-html', async (_event, htmlContent) => {
 app.whenReady().then(async () => {
   logFile = path.join(app.getPath('userData'), 'startup.log');
   writeLog('Eastern Sweets starting');
+  try {
+    await selectServerPort();
+  } catch (error) {
+    writeLog(`Port selection failed: ${error.message}`);
+    dialog.showErrorBox('Eastern Sweets could not start', `${error.message}\n\nPlease restart Windows and try again.`);
+    app.quit();
+    return;
+  }
   createWindow();
   createTray();
   setupAutoUpdater();

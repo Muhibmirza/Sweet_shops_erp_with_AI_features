@@ -25,7 +25,7 @@ export const PERMISSIONS: Record<Role, { tabs: TabKey[]; dashboardWidgets: strin
     dashboardWidgets: ['all']
   },
   MANAGER: {
-    tabs: ['pos', 'inventory', 'packaging'],
+    tabs: ['pos', 'inventory', 'production', 'settings'],
     dashboardWidgets: []
   },
   PRODUCTION_MANAGER: {

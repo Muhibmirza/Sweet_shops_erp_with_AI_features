@@ -4,7 +4,6 @@ import {
   BookOpen,
   Boxes,
   Building2,
-  ChefHat,
   ChevronLeft,
   ClipboardList,
   CreditCard,
@@ -26,6 +25,7 @@ import { useEffect, useState } from 'react';
 import { PERMISSIONS, ROLE_LABELS, type TabKey } from '../config/permissions';
 import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
+import { ErpAiAssistant } from './assistant/ErpAiAssistant';
 
 const nav = [
   { key: 'dashboard', to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -33,9 +33,7 @@ const nav = [
   { key: 'sales', to: '/sales', label: 'Sales', icon: Receipt },
   { key: 'inventory', to: '/inventory', label: 'Inventory', icon: Boxes },
   { key: 'inventory', to: '/raw-materials', label: 'Raw Materials', icon: Boxes },
-  { key: 'inventory', to: '/inventory/kitchen', label: 'Kitchen', icon: ChefHat },
   { key: 'production', to: '/production', label: 'Production', icon: PackagePlus },
-  { key: 'production', to: '/recipes', label: 'Recipes', icon: ChefHat },
   { key: 'orders', to: '/orders', label: 'Orders', icon: ClipboardList },
   { key: 'customers', to: '/customers', label: 'Customers', icon: Users },
   { key: 'suppliers', to: '/suppliers', label: 'Suppliers', icon: Building2 },
@@ -49,8 +47,7 @@ const nav = [
   { key: 'accounting', to: '/accounting', label: 'Accounting', icon: ScrollText },
   { key: 'reports', to: '/reports', label: 'Reports', icon: BarChart3 },
   { key: 'settings', to: '/settings', label: 'Settings', icon: Settings },
-  { key: 'settings', to: '/settings/backup', label: 'Backup', icon: DatabaseBackup },
-  { key: 'packaging', to: '/settings/packaging', label: 'Packaging', icon: PackagePlus }
+  { key: 'settings', to: '/settings/backup', label: 'Backup', icon: DatabaseBackup }
 ] satisfies Array<{ key: TabKey; to: string; label: string; icon: typeof LayoutDashboard }>;
 
 export function Layout() {
@@ -177,6 +174,7 @@ export function Layout() {
           </section>
         </div>
       )}
+      <ErpAiAssistant />
     </div>
   );
 }
@@ -233,25 +231,13 @@ const guides: Array<{ match: (path: string) => boolean; guide: Guide }> = [
     }
   },
   {
-    match: (path) => path === '/recipes',
-    guide: {
-      title: 'Recipe / BOM Workflow',
-      summary: 'Recipes connect finished products with raw material ingredients. They define how much material is needed to produce a product batch.',
-      points: [
-        'Select the finished product, set yield quantity/unit, then add raw materials with KG, GRAM, LITRE, or PIECE quantities.',
-        'Cost preview uses raw material cost plus labour, packaging, other overheads, and wastage percentage.',
-        'Production Orders use this recipe to plan consumption, calculate batch cost, and update product currentCost.'
-      ]
-    }
-  },
-  {
     match: (path) => path === '/production',
     guide: {
       title: 'Production Workflow',
-      summary: 'Production Orders convert raw materials into finished goods. This connects Recipe costing with Inventory stock.',
+      summary: 'Production Orders, Recipes/BOM, Kitchen Stock, Transfers, Adjustments, and Kitchen Reports are managed together here.',
       points: [
         'Create production order from a recipe and planned quantity; material requirements are generated automatically.',
-        'When completed, actual raw material consumption is deducted and finished product stock is increased.',
+        'When completed, recipe quantities are deducted from Kitchen Stock and finished product stock is increased.',
         'Product currentCost is updated from production cost, so POS profit reports become more accurate.'
       ]
     }

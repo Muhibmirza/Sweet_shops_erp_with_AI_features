@@ -5,6 +5,26 @@ import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { createProductionEntry } from '../services/journalService';
 
+const convertUnit = (quantity: number, from: string, to: string) => {
+  const source = String(from || '').toUpperCase();
+  const target = String(to || '').toUpperCase();
+  if (source === target) return quantity;
+  if (source === 'GRAM' && target === 'KG') return quantity / 1000;
+  if (source === 'KG' && target === 'GRAM') return quantity * 1000;
+  if (source === 'ML' && target === 'LITRE') return quantity / 1000;
+  if (source === 'LITRE' && target === 'ML') return quantity * 1000;
+  return quantity;
+};
+
+const getKitchenBalance = async (rawMaterialId: string) => {
+  const [transfers, consumptions, adjustments] = await Promise.all([
+    prisma.kitchenTransfer.aggregate({ where: { rawMaterialId }, _sum: { quantity: true } }),
+    prisma.kitchenConsumption.aggregate({ where: { rawMaterialId }, _sum: { quantityDeducted: true } }),
+    prisma.kitchenAdjustment.aggregate({ where: { rawMaterialId }, _sum: { quantity: true } })
+  ]);
+  return Number(transfers._sum.quantity || 0) - Number(consumptions._sum.quantityDeducted || 0) + Number(adjustments._sum.quantity || 0);
+};
+
 export const getProductionOrders = async (_req: AuthRequest, res: Response) => {
   try {
     const orders = await prisma.productionOrder.findMany({
@@ -135,6 +155,40 @@ export const startProductionOrder = async (req: AuthRequest, res: Response) => {
 export const completeProductionOrder = async (req: AuthRequest, res: Response) => {
   try {
     const { actualQuantity, consumptions = [], labourCost, laborCost, packagingCost, packingCost, otherOverheads, wastagePercent } = req.body;
+    const pendingOrder = await prisma.productionOrder.findUnique({
+      where: { id: req.params.id },
+      include: { product: true, recipe: true, consumptions: { include: { rawMaterial: true } } }
+    });
+    if (!pendingOrder) return res.status(404).json({ success: false, message: 'Production order not found' });
+    if (pendingOrder.status === 'COMPLETED') return res.status(400).json({ success: false, message: 'Production order is already completed' });
+
+    const requestedFinishedQty = Number(actualQuantity || pendingOrder.plannedQuantity);
+    if (!Number.isFinite(requestedFinishedQty) || requestedFinishedQty <= 0) return res.status(400).json({ success: false, message: 'Actual quantity must be greater than zero' });
+    const outputScale = pendingOrder.plannedQuantity > 0 ? requestedFinishedQty / pendingOrder.plannedQuantity : 1;
+    const kitchenConsumptions = pendingOrder.consumptions.map((consumption) => {
+      const override = consumptions.find((item: any) => item.rawMaterialId === consumption.rawMaterialId);
+      const actualQty = Number(override?.actualQty ?? consumption.plannedQty * outputScale);
+      return {
+        productionConsumptionId: consumption.id,
+        rawMaterialId: consumption.rawMaterialId,
+        material: consumption.rawMaterial.name,
+        quantityDeducted: convertUnit(actualQty, consumption.unit, consumption.rawMaterial.unit),
+        actualQty,
+        unit: consumption.rawMaterial.unit,
+        rawMaterial: consumption.rawMaterial
+      };
+    });
+    const shortfalls = (await Promise.all(kitchenConsumptions.map(async (item) => {
+      const available = await getKitchenBalance(item.rawMaterialId);
+      return available + 0.000001 < item.quantityDeducted
+        ? { material: item.material, rawMaterialId: item.rawMaterialId, required: item.quantityDeducted, available, shortfall: item.quantityDeducted - available, unit: item.unit }
+        : null;
+    }))).filter(Boolean);
+
+    if (shortfalls.length && !req.body.confirmShortfall) {
+      return res.json({ success: false, requiresConfirmation: true, message: 'Insufficient kitchen stock for some materials.', shortfalls });
+    }
+
     const completed = await prisma.$transaction(async (tx) => {
     const order = await tx.productionOrder.findUnique({
       where: { id: req.params.id },
@@ -144,26 +198,9 @@ export const completeProductionOrder = async (req: AuthRequest, res: Response) =
       if (order.status === 'COMPLETED') throw new Error('Production order is already completed');
 
     let rawMaterialCost = 0;
-    for (const consumption of order.consumptions) {
-      const override = consumptions.find((item: any) => item.rawMaterialId === consumption.rawMaterialId);
-      const actualQty = Number(override?.actualQty ?? consumption.plannedQty);
-      const from = (consumption.unit || '').toUpperCase();
-      const to = (consumption.rawMaterial.unit || '').toUpperCase();
-      let costingQty = actualQty;
-      if (from === 'GRAM' && to === 'KG') costingQty = actualQty / 1000;
-      if (from === 'KG' && to === 'GRAM') costingQty = actualQty * 1000;
-      rawMaterialCost += costingQty * (consumption.rawMaterial.avgCost || consumption.rawMaterial.costPerUnit || 0);
-      await tx.rawMaterial.update({ where: { id: consumption.rawMaterialId }, data: { currentStock: { decrement: costingQty } } });
-      await tx.productionConsumption.update({ where: { id: consumption.id }, data: { actualQty } });
-      await tx.stockMovement.create({
-        data: {
-          rawMaterialId: consumption.rawMaterialId,
-          type: 'OUT',
-          quantity: actualQty,
-          reason: `Production ${order.id}`,
-          userId: req.user!.id
-        }
-      });
+    for (const consumption of kitchenConsumptions) {
+      rawMaterialCost += consumption.quantityDeducted * Number(consumption.rawMaterial.avgCost || consumption.rawMaterial.costPerUnit || 0);
+      await tx.productionConsumption.update({ where: { id: consumption.productionConsumptionId }, data: { actualQty: consumption.actualQty } });
     }
 
     const finishedQty = Number(actualQuantity || order.plannedQuantity);
@@ -185,6 +222,23 @@ export const completeProductionOrder = async (req: AuthRequest, res: Response) =
     await tx.stockMovement.create({
       data: { productId: order.productId, type: 'IN', quantity: finishedQty, reason: `Production ${order.id}`, userId: req.user!.id }
     });
+    const kitchenRun = await tx.kitchenProductionRun.create({
+      data: {
+        productId: order.productId,
+        quantityProduced: finishedQty,
+        unit: order.recipe.yieldUnit || order.product.unit,
+        producedBy: req.user!.id,
+        productionDate: order.productionDate,
+        notes: `Automatically created from production order ${order.id}`,
+        consumptions: {
+          create: kitchenConsumptions.map((item) => ({
+            rawMaterialId: item.rawMaterialId,
+            quantityDeducted: item.quantityDeducted,
+            unit: item.unit
+          }))
+        }
+      }
+    });
     const updated = await tx.productionOrder.update({
       where: { id: order.id },
       data: {
@@ -203,6 +257,15 @@ export const completeProductionOrder = async (req: AuthRequest, res: Response) =
       include: { product: true, recipe: true, consumptions: { include: { rawMaterial: true } } }
     });
     await createProductionEntry(order.id, rawMaterialCost, totalBatchCost, tx);
+    await tx.auditLog.create({
+      data: {
+        userId: req.user!.id,
+        action: 'COMPLETE',
+        tableName: 'ProductionOrder',
+        recordId: order.id,
+        newData: JSON.stringify({ finishedQty, kitchenProductionRunId: kitchenRun.id, shortfalls })
+      }
+    });
       return { ...updated, totalCost: totalBatchCost, qtyProduced: finishedQty, costPerUnit };
     });
     res.json({ success: true, data: completed });

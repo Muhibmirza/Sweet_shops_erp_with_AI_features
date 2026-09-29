@@ -24,13 +24,10 @@ import Reports from './pages/Reports';
 import ProductSalesReport from './pages/ProductSalesReport';
 import Settings from './pages/Settings';
 import Backup from './pages/settings/Backup';
-import PackagingTypes from './pages/settings/PackagingTypes';
-import Kitchen from './pages/inventory/Kitchen';
 import AccountingDashboard from './pages/accounting/AccountingDashboard';
 import ChartOfAccounts from './pages/accounting/ChartOfAccounts';
 import JournalEntries from './pages/accounting/JournalEntries';
-import RecipeManagement from './pages/production/RecipeManagement';
-import ProductionOrders from './pages/production/ProductionOrders';
+import ProductionHub from './pages/production/ProductionHub';
 import LeaveManagement from './pages/hr/LeaveManagement';
 import EmployeeAdvances from './pages/hr/EmployeeAdvances';
 import EmployeeDetail from './pages/hr/EmployeeDetail';
@@ -108,7 +105,6 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/pos" element={<ProtectedRoute allowedRoles={['ADMIN', 'MANAGER', 'CASHIER']}><POS /></ProtectedRoute>} />
               <Route path="/sales" element={<ProtectedRoute allowedRoles={['ADMIN']}><SalesHistory /></ProtectedRoute>} />
               <Route path="/inventory" element={<ProtectedRoute allowedRoles={['ADMIN', 'MANAGER', 'PRODUCTION_MANAGER']}><Inventory /></ProtectedRoute>} />
-              <Route path="/inventory/kitchen" element={<ProtectedRoute allowedRoles={['ADMIN', 'MANAGER', 'PRODUCTION_MANAGER']}><Kitchen /></ProtectedRoute>} />
               <Route path="/raw-materials" element={<ProtectedRoute allowedRoles={['ADMIN', 'PRODUCTION_MANAGER']}><RawMaterials /></ProtectedRoute>} />
               <Route path="/orders" element={<ProtectedRoute allowedRoles={['ADMIN', 'PRODUCTION_MANAGER', 'CASHIER']}><Orders /></ProtectedRoute>} />
               <Route path="/customers" element={<ProtectedRoute allowedRoles={['ADMIN', 'CASHIER']}><Customers /></ProtectedRoute>} />
@@ -119,8 +115,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/expenses" element={<ProtectedRoute allowedRoles={['ADMIN']}><Expenses /></ProtectedRoute>} />
               <Route path="/staff" element={<ProtectedRoute allowedRoles={['ADMIN']}><Staff /></ProtectedRoute>} />
               <Route path="/hr/employees/:id" element={<ProtectedRoute allowedRoles={['ADMIN']}><EmployeeDetail /></ProtectedRoute>} />
-              <Route path="/recipes" element={<ProtectedRoute allowedRoles={['ADMIN', 'PRODUCTION_MANAGER']}><RecipeManagement /></ProtectedRoute>} />
-              <Route path="/production" element={<ProtectedRoute allowedRoles={['ADMIN', 'PRODUCTION_MANAGER']}><ProductionOrders /></ProtectedRoute>} />
+              <Route path="/production" element={<ProtectedRoute allowedRoles={['ADMIN', 'MANAGER', 'PRODUCTION_MANAGER']}><ProductionHub /></ProtectedRoute>} />
               <Route path="/accounting" element={<ProtectedRoute allowedRoles={['ADMIN']}><AccountingDashboard /></ProtectedRoute>} />
               <Route path="/accounting/chart-of-accounts" element={<ProtectedRoute allowedRoles={['ADMIN']}><ChartOfAccounts /></ProtectedRoute>} />
               <Route path="/accounting/journal-entries" element={<ProtectedRoute allowedRoles={['ADMIN']}><JournalEntries /></ProtectedRoute>} />
@@ -131,9 +126,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="/daily-closing" element={<ProtectedRoute allowedRoles={['ADMIN']}><DailyClosing /></ProtectedRoute>} />
               <Route path="/reports" element={<ProtectedRoute allowedRoles={['ADMIN']}><Reports /></ProtectedRoute>} />
               <Route path="/reports/product-sales" element={<ProtectedRoute allowedRoles={['ADMIN']}><ProductSalesReport /></ProtectedRoute>} />
-              <Route path="/settings" element={<ProtectedRoute allowedRoles={['ADMIN']}><Settings /></ProtectedRoute>} />
+              <Route path="/settings" element={<ProtectedRoute allowedRoles={['ADMIN', 'MANAGER']}><Settings /></ProtectedRoute>} />
               <Route path="/settings/backup" element={<ProtectedRoute allowedRoles={['ADMIN']}><Backup /></ProtectedRoute>} />
-              <Route path="/settings/packaging" element={<ProtectedRoute allowedRoles={['ADMIN', 'MANAGER']}><PackagingTypes /></ProtectedRoute>} />
               <Route path="/unauthorized" element={<Unauthorized />} />
             </Route>
           </Routes>

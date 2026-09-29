@@ -37,6 +37,7 @@ import advanceRoutes from './routes/advance.routes';
 import auditRoutes from './routes/audit.routes';
 import packagingTypeRoutes from './routes/packagingType.routes';
 import kitchenRoutes from './routes/kitchen.routes';
+import assistantRoutes from './routes/assistant.routes';
 import { initBackupScheduler } from './services/backupScheduler';
 import { ensureDefaultData } from './services/bootstrapService';
 
@@ -98,6 +99,7 @@ app.use('/api/advances', advanceRoutes);
 app.use('/api/audit-logs', auditRoutes);
 app.use('/api/packaging-types', packagingTypeRoutes);
 app.use('/api/kitchen', kitchenRoutes);
+app.use('/api/assistant', assistantRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', message: 'Eastern Sweets API is running' });
@@ -120,7 +122,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   });
 });
 
-const server = app.listen(PORT, '0.0.0.0', () => {
+export const server = app.listen(PORT, '0.0.0.0', () => {
   ensureDefaultData()
     .then(() => initBackupScheduler())
     .catch((error) => console.error('Startup bootstrap failed [REDACTED]'));
