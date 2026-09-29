@@ -53,7 +53,6 @@ export default function POS() {
   const [detailInputMode, setDetailInputMode] = useState<'g' | 'kg'>('g');
   const [detailCustomQuantity, setDetailCustomQuantity] = useState('');
   const [detailPackagingId, setDetailPackagingId] = useState<string | null>(null);
-  const [detailTokenOpen, setDetailTokenOpen] = useState(false);
 
   const products = useQuery({ queryKey: ['products'], queryFn: () => unwrap<Product[]>(api.get('/api/products?limit=200&isActive=true')) });
   const categories = useQuery({ queryKey: ['categories'], queryFn: () => unwrap<Category[]>(api.get('/api/categories')) });
@@ -98,7 +97,6 @@ export default function POS() {
     setDetailInputMode('g');
     setDetailCustomQuantity('');
     setDetailPackagingId(null);
-    setDetailTokenOpen(false);
     setTokenNumber('');
   };
 
@@ -149,7 +147,6 @@ export default function POS() {
       const lineTotal = Math.round(existing.unitPrice * quantity);
       return current.map((line) => line === existing ? { ...line, quantity, displayQuantity: toDisplayQuantity(quantity, line.displayUnit, line.product.unit), lineTotal, packagingCharge: packagingChargeFor(line.packagingOptions.find((option) => option.id === line.packagingTypeId), quantity, lineTotal) } : line);
     });
-    setSelectedProduct(null);
     toast(`${detailLine.product.name} added to cart`);
   };
 
@@ -301,15 +298,28 @@ export default function POS() {
     saleMutation.mutate({ tokenNumber: finalTokenNumber, tokenSlip: buildTokenSlipData(finalTokenNumber) });
   };
 
-  const submitDetailTokenSale = () => {
-    if (!validateDetail() || !detailLine) return;
-    const finalTokenNumber = Number(tokenNumber || nextToken.data?.nextNumber || 1);
-    if (!finalTokenNumber || finalTokenNumber <= 0) return;
-    saleMutation.mutate({ tokenNumber: finalTokenNumber, lines: [detailLine], tokenSlip: buildTokenSlipData(finalTokenNumber, [detailLine]) });
-  };
-
   return (
-    <div className="grid gap-4 xl:grid-cols-[1fr_420px]">
+    <div className={selectedProduct ? 'grid gap-5 xl:grid-cols-[minmax(0,1fr)_440px]' : 'space-y-4'}>
+      {selectedProduct && detailLine ? (
+        <section className="animate-in slide-in-from-right-4 rounded-2xl border border-[#ead8bb] bg-white p-5 shadow-sm duration-200 lg:p-8">
+          <button type="button" className="mb-6 inline-flex min-h-11 items-center gap-2 font-semibold text-[#0f615d]" onClick={() => setSelectedProduct(null)}><ArrowLeft size={18} /> Back to Products</button>
+          <div className="mb-8 border-b border-[#ead8bb] pb-6"><p className="erp-eyebrow">Product Detail</p><h2 className="font-serif text-4xl font-bold uppercase tracking-wide text-[#0f615d] lg:text-5xl">{selectedProduct.name}</h2><p className="mt-3 text-2xl font-semibold text-orange-600">{pkr(selectedProduct.sellingPrice)} / {selectedProduct.saleMode === 'WEIGHT' ? 'kg' : selectedProduct.unit.toLowerCase()}</p><p className={`mt-2 text-base ${selectedProduct.currentStock <= selectedProduct.minStockLevel ? 'font-semibold text-red-600' : 'text-slate-500'}`}>Stock: {formatQuantity(selectedProduct.currentStock, selectedProduct.unit)} available</p></div>
+
+          <div className="grid gap-8 lg:grid-cols-2">
+            <section><h3 className="mb-4 text-xl font-semibold text-[#0f615d]">Select Quantity</h3>
+              {selectedProduct.saleMode === 'WEIGHT' ? <>
+                <div className="grid grid-cols-3 gap-3">{(selectedProduct.quantityPresets?.length ? selectedProduct.quantityPresets : [250, 500, 750, 1000, 1500, 2000]).map((grams) => <button type="button" key={grams} disabled={grams / 1000 > selectedProduct.currentStock} className={`min-h-14 rounded-xl border text-base font-semibold transition ${Math.abs(detailQuantity - grams / 1000) < 0.000001 ? 'border-[#0f615d] bg-[#0f615d] text-white shadow-md' : 'border-[#dac197] bg-[#fffaf0] text-[#0f615d] hover:border-[#0f615d]'}`} onClick={() => { setDetailQuantity(grams / 1000); setDetailCustomQuantity(''); }}>{grams >= 1000 ? `${grams / 1000}kg` : `${grams}g`}</button>)}</div>
+                <div className="mt-4 flex items-center gap-2"><span className="text-sm font-semibold">Custom:</span><input className="erp-input no-spinner min-w-0 flex-1" type="number" min="0" step={detailInputMode === 'g' ? 1 : 0.001} value={detailCustomQuantity} onChange={(event) => setDetailCustom(event.target.value)} placeholder={detailInputMode === 'g' ? 'grams' : 'kilograms'} /><div className="flex overflow-hidden rounded-md border"><button type="button" className={`h-11 px-4 text-sm font-semibold ${detailInputMode === 'g' ? 'bg-[#0f615d] text-white' : ''}`} onClick={() => { setDetailInputMode('g'); setDetailCustomQuantity(''); }}>g</button><button type="button" className={`h-11 px-4 text-sm font-semibold ${detailInputMode === 'kg' ? 'bg-[#0f615d] text-white' : ''}`} onClick={() => { setDetailInputMode('kg'); setDetailCustomQuantity(''); }}>kg</button></div></div>
+              </> : <div className="flex items-center gap-4 rounded-xl border border-[#ead8bb] bg-[#fffaf0] p-4"><button type="button" className="touch rounded-md border bg-white" onClick={() => setDetailQuantity(Math.max(1, detailQuantity - 1))}><Minus size={20} /></button><span className="min-w-14 text-center text-2xl font-bold">{detailQuantity}</span><button type="button" className="touch rounded-md border bg-white disabled:opacity-40" disabled={detailQuantity >= selectedProduct.currentStock} onClick={() => setDetailQuantity(detailQuantity + 1)}><Plus size={20} /></button><span className="text-sm text-slate-500">sold by piece/unit</span></div>}
+            </section>
+
+            <section><h3 className="mb-4 text-xl font-semibold text-[#0f615d]">Packaging</h3><div className="space-y-2"><label className="flex min-h-12 cursor-pointer items-center justify-between rounded-xl border border-[#ead8bb] px-4"><span className="flex items-center gap-2"><input type="radio" name="detail-packaging" checked={!detailPackagingId} onChange={() => setDetailPackagingId(null)} /> No Packaging</span><span>{pkr(0)}</span></label>{detailOptions.map((option) => <label key={option.id} className="flex min-h-12 cursor-pointer items-center justify-between rounded-xl border border-[#ead8bb] px-4"><span className="flex items-center gap-2"><input type="radio" name="detail-packaging" checked={detailPackagingId === option.id} onChange={() => setDetailPackagingId(option.id)} /> {option.name}</span><span>+{option.chargeType === 'PERCENTAGE' ? `${option.extraCharge}%` : `${pkr(option.extraCharge)}${option.chargeType === 'PER_KG' ? '/kg' : ''}`}</span></label>)}</div></section>
+          </div>
+
+          <section className="mt-8 grid gap-3 rounded-2xl border border-[#dac197] bg-[#fffaf0] p-5 text-base sm:grid-cols-2"><div className="flex justify-between"><span>Qty</span><b>{formatQuantity(detailLine.displayQuantity, detailLine.displayUnit)}</b></div><div className="flex justify-between"><span>Rate</span><b>{pkr(detailLine.unitPrice)} / {selectedProduct.saleMode === 'WEIGHT' ? 'kg' : selectedProduct.unit.toLowerCase()}</b></div><div className="flex justify-between"><span>Item Total</span><b>{pkr(detailItemTotal)}</b></div><div className="flex justify-between"><span>Packaging</span><b>{pkr(detailPackagingCharge)}</b></div><div className="flex justify-between border-t border-[#dac197] pt-3 text-xl font-bold text-[#0f615d] sm:col-span-2"><span>LINE TOTAL</span><span>{pkr(detailItemTotal + detailPackagingCharge)}</span></div>{detailQuantity > selectedProduct.currentStock && <p className="font-semibold text-red-600 sm:col-span-2 sm:text-right">Only {formatQuantity(selectedProduct.currentStock, selectedProduct.unit)} available</p>}</section>
+          <button type="button" className="btn-primary mt-5 min-h-14 w-full text-lg" disabled={detailQuantity <= 0 || detailQuantity > selectedProduct.currentStock} onClick={addDetailToCart}>Add to Cart</button>
+        </section>
+      ) : (
       <section className="space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row">
           <div className="flex min-h-11 flex-1 items-center gap-2 rounded-md border bg-white px-3 dark:border-slate-800 dark:bg-slate-900">
@@ -348,29 +358,14 @@ export default function POS() {
           ))}
         </div>
       </section>
+      )}
 
-      <aside className="rounded-lg border bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        {selectedProduct && detailLine ? (
-          <div className="animate-in slide-in-from-right-4 space-y-5 duration-200">
-            <button type="button" className="inline-flex min-h-11 items-center gap-2 font-semibold text-[#0f615d]" onClick={() => setSelectedProduct(null)}><ArrowLeft size={18} /> Back to Cart</button>
-            <div><h2 className="font-serif text-2xl font-bold uppercase text-[#0f615d]">{selectedProduct.name}</h2><p className="text-lg font-semibold text-orange-600">{pkr(selectedProduct.sellingPrice)} / {selectedProduct.saleMode === 'WEIGHT' ? 'kg' : selectedProduct.unit.toLowerCase()}</p><p className={`mt-1 text-sm ${selectedProduct.currentStock <= selectedProduct.minStockLevel ? 'text-red-600' : 'text-slate-500'}`}>Stock: {formatQuantity(selectedProduct.currentStock, selectedProduct.unit)} available</p></div>
-
-            <section className="border-t pt-4"><h3 className="mb-3 font-semibold">Select Quantity</h3>
-              {selectedProduct.saleMode === 'WEIGHT' ? <>
-                <div className="grid grid-cols-4 gap-2">{(selectedProduct.quantityPresets?.length ? selectedProduct.quantityPresets : [250, 500, 750, 1000, 1500, 2000]).map((grams) => <button type="button" key={grams} disabled={grams / 1000 > selectedProduct.currentStock} className={`min-h-11 rounded-md border text-sm font-semibold ${Math.abs(detailQuantity - grams / 1000) < 0.000001 ? 'border-[#0f615d] bg-[#0f615d] text-white' : 'border-[#dac197] bg-[#fffaf0] text-[#0f615d]'}`} onClick={() => { setDetailQuantity(grams / 1000); setDetailCustomQuantity(''); }}>{grams >= 1000 ? `${grams / 1000}kg` : `${grams}g`}</button>)}</div>
-                <div className="mt-3 flex items-center gap-2"><span className="text-sm font-semibold">Custom:</span><input className="erp-input no-spinner min-w-0 flex-1" type="number" min="0" step={detailInputMode === 'g' ? 1 : 0.001} value={detailCustomQuantity} onChange={(event) => setDetailCustom(event.target.value)} placeholder={detailInputMode === 'g' ? 'grams' : 'kilograms'} /><div className="flex rounded-md border"><button type="button" className={`h-11 px-3 text-sm font-semibold ${detailInputMode === 'g' ? 'bg-[#0f615d] text-white' : ''}`} onClick={() => { setDetailInputMode('g'); setDetailCustomQuantity(''); }}>g</button><button type="button" className={`h-11 px-3 text-sm font-semibold ${detailInputMode === 'kg' ? 'bg-[#0f615d] text-white' : ''}`} onClick={() => { setDetailInputMode('kg'); setDetailCustomQuantity(''); }}>kg</button></div></div>
-              </> : <div className="flex items-center gap-3"><button type="button" className="touch rounded-md border" onClick={() => setDetailQuantity(Math.max(1, detailQuantity - 1))}><Minus size={18} /></button><span className="min-w-12 text-center text-xl font-bold">{detailQuantity}</span><button type="button" className="touch rounded-md border disabled:opacity-40" disabled={detailQuantity >= selectedProduct.currentStock} onClick={() => setDetailQuantity(detailQuantity + 1)}><Plus size={18} /></button><span className="text-sm text-slate-500">sold by piece/unit</span></div>}
-            </section>
-
-            <section className="border-t pt-4"><h3 className="mb-3 font-semibold">Packaging</h3><div className="space-y-2"><label className="flex min-h-10 cursor-pointer items-center justify-between rounded-md border px-3"><span className="flex items-center gap-2"><input type="radio" name="detail-packaging" checked={!detailPackagingId} onChange={() => setDetailPackagingId(null)} /> No Packaging</span><span>{pkr(0)}</span></label>{detailOptions.map((option) => <label key={option.id} className="flex min-h-10 cursor-pointer items-center justify-between rounded-md border px-3"><span className="flex items-center gap-2"><input type="radio" name="detail-packaging" checked={detailPackagingId === option.id} onChange={() => setDetailPackagingId(option.id)} /> {option.name}</span><span>+{option.chargeType === 'PERCENTAGE' ? `${option.extraCharge}%` : `${pkr(option.extraCharge)}${option.chargeType === 'PER_KG' ? '/kg' : ''}`}</span></label>)}</div></section>
-
-            <section className="space-y-2 border-y py-4 text-sm"><div className="flex justify-between"><span>Qty</span><b>{formatQuantity(detailLine.displayQuantity, detailLine.displayUnit)}</b></div><div className="flex justify-between"><span>Rate</span><b>{pkr(detailLine.unitPrice)} / {selectedProduct.saleMode === 'WEIGHT' ? 'kg' : selectedProduct.unit.toLowerCase()}</b></div><div className="flex justify-between"><span>Item Total</span><b>{pkr(detailItemTotal)}</b></div><div className="flex justify-between"><span>Packaging</span><b>{pkr(detailPackagingCharge)}</b></div><div className="flex justify-between text-lg font-bold text-[#0f615d]"><span>LINE TOTAL</span><span>{pkr(detailItemTotal + detailPackagingCharge)}</span></div>{detailQuantity > selectedProduct.currentStock && <p className="text-right font-semibold text-red-600">Only {formatQuantity(selectedProduct.currentStock, selectedProduct.unit)} available</p>}</section>
-
-            <div className="grid grid-cols-2 gap-2"><button type="button" className="btn-primary" disabled={detailQuantity <= 0 || detailQuantity > selectedProduct.currentStock} onClick={addDetailToCart}>Add to Cart</button><button type="button" className="touch inline-flex items-center justify-center gap-2 rounded-md border border-blue-300 font-semibold text-blue-700 disabled:opacity-40" disabled={detailQuantity <= 0 || detailQuantity > selectedProduct.currentStock || saleMutation.isPending} onClick={() => { setTokenNumber(String(nextToken.data?.nextNumber || '')); setDetailTokenOpen(true); }}><Ticket size={16} /> Generate Token</button></div>
-            {detailTokenOpen && <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-2"><span className="text-sm font-semibold text-blue-700">Token No:</span><input type="number" autoFocus value={tokenNumber} onChange={(event) => setTokenNumber(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submitDetailTokenSale(); }} className="h-10 w-20 rounded border border-blue-300 bg-white px-2 text-center text-lg font-bold outline-none" /><button type="button" className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white" disabled={saleMutation.isPending} onClick={submitDetailTokenSale}>Print</button><button type="button" className="px-2 text-sm font-semibold text-slate-500" onClick={() => setDetailTokenOpen(false)}>Cancel</button></div>}
-          </div>
-        ) : <>
-        <h2 className="mb-3 text-lg font-semibold">Cart</h2>
+      {selectedProduct && (
+      <aside className="sticky top-20 self-start rounded-lg border bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Cart &amp; Checkout</h2>
+          <span className="rounded-full bg-[#e8f3f1] px-3 py-1 text-xs font-bold text-[#0f615d]">{cart.length} item{cart.length === 1 ? '' : 's'}</span>
+        </div>
         <div className="max-h-[42vh] space-y-2 overflow-auto pr-1">
           {cart.map((line) => (
             <div key={line.product.id} className="rounded-md border p-3 dark:border-slate-800">
@@ -403,7 +398,7 @@ export default function POS() {
               {line.quantity >= line.product.currentStock && <div className="mt-1 text-xs text-red-600">Only {formatQuantity(line.product.currentStock, line.product.unit)} available</div>}
             </div>
           ))}
-          {cart.length === 0 && <div className="rounded-md bg-slate-100 p-6 text-center text-sm text-slate-500 dark:bg-slate-800">Tap products to build a bill</div>}
+          {cart.length === 0 && <div className="rounded-md bg-slate-100 p-6 text-center text-sm text-slate-500 dark:bg-slate-800">Add this product to begin the bill, or go back to select another product.</div>}
         </div>
         <div className="mt-4 space-y-3 border-t pt-4 dark:border-slate-800">
           <div className="flex justify-between text-sm"><span>Subtotal</span><span>{pkr(subtotal)}</span></div>
@@ -476,8 +471,8 @@ export default function POS() {
             </div>
           )}
         </div>
-        </>}
       </aside>
+      )}
     </div>
   );
 }
