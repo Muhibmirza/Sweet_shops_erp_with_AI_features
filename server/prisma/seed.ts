@@ -136,12 +136,27 @@ async function main() {
   const bakery = await prisma.category.create({
     data: { name: 'Bakery Items', type: 'BAKERY', description: 'Fresh baked goods' }
   });
-  await prisma.category.create({
+  const coldDrinks = await prisma.category.create({
     data: { name: 'Cold Drinks', type: 'BAKERY', description: 'Beverages and drinks' }
   });
   await prisma.category.create({
     data: { name: 'Raw Materials', type: 'RAW_MATERIAL', description: 'Kitchen and bakery ingredients' }
   });
+
+  const saleCategoryIds = [desiSweets.id, modernSweets.id, bakery.id, coldDrinks.id];
+  for (const option of [
+    { name: 'Gift Box', chargeType: 'FIXED', extraCharge: 100 },
+    { name: 'Tokra', chargeType: 'PER_KG', extraCharge: 50 },
+    { name: 'Plain Box', chargeType: 'FIXED', extraCharge: 30 },
+    { name: 'Tin', chargeType: 'FIXED', extraCharge: 150 }
+  ]) {
+    await prisma.packagingType.create({
+      data: {
+        ...option,
+        categories: { create: saleCategoryIds.map((categoryId) => ({ categoryId })) }
+      }
+    });
+  }
 
   const products = [
     { name: 'Gulab Jamun', categoryId: desiSweets.id, unit: 'PIECE', sellingPrice: 25, costPrice: 12, currentStock: 100, minStockLevel: 20, skuCode: 'ES-SWT-GJ-001', barcode: '896400100001' },

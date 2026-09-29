@@ -6,9 +6,13 @@ export interface AssistantStatus {
   provider: 'groq';
   role: string;
   supportedLanguages: string[];
+  readOnly?: boolean;
+  canExecuteActions?: boolean;
 }
 
-export type AssistantAction = { type: 'NAVIGATE'; path: string };
+export type AssistantAction =
+  | { type: 'NAVIGATE'; path: string }
+  | { type: 'ERP_MUTATION'; token: string; method: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; endpoint: string; label: string };
 
 export interface AssistantPlan {
   reply: string;

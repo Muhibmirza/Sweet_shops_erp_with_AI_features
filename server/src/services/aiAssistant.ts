@@ -18,7 +18,7 @@ function providerError(payload: any, status: number) {
   return Object.assign(new Error(message), { status: status === 429 ? 429 : 502 });
 }
 
-async function callGroqChat(
+export async function callGroqChat(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   options: { temperature?: number; maxTokens?: number; schema?: { name: string; value: Record<string, unknown> } } = {}
 ) {

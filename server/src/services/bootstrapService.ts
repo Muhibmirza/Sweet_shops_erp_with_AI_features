@@ -11,6 +11,27 @@ export const defaultCategories = [
   { name: 'Raw Materials', type: 'RAW_MATERIAL', description: 'Kitchen and bakery ingredients' }
 ];
 
+export const defaultPackagingOptions = [
+  { name: 'Gift Box', chargeType: 'FIXED', extraCharge: 100 },
+  { name: 'Tokra', chargeType: 'PER_KG', extraCharge: 50 },
+  { name: 'Plain Box', chargeType: 'FIXED', extraCharge: 30 },
+  { name: 'Tin', chargeType: 'FIXED', extraCharge: 150 }
+];
+
+export async function ensureDefaultPackagingForCategory(categoryId: string) {
+  const category = await prisma.category.findUnique({ where: { id: categoryId }, select: { id: true, type: true, isActive: true, _count: { select: { packagingCategories: true } } } });
+  if (!category || !category.isActive || category.type === 'RAW_MATERIAL' || category._count.packagingCategories > 0) return;
+  for (const option of defaultPackagingOptions) {
+    let packaging = await prisma.packagingType.findFirst({ where: { name: option.name } });
+    if (!packaging) packaging = await prisma.packagingType.create({ data: option });
+    await prisma.packagingTypeCategory.upsert({
+      where: { packagingTypeId_categoryId: { packagingTypeId: packaging.id, categoryId } },
+      update: {},
+      create: { packagingTypeId: packaging.id, categoryId }
+    });
+  }
+}
+
 export async function ensureDefaultData() {
   const existingSettings = await prisma.shopSettings.findFirst();
   if (!existingSettings) {
@@ -78,6 +99,9 @@ export async function ensureDefaultData() {
     const existing = await prisma.category.findFirst({ where: { name: category.name } });
     if (!existing) await prisma.category.create({ data: category });
   }
+
+  const saleCategories = await prisma.category.findMany({ where: { isActive: true, type: { not: 'RAW_MATERIAL' } }, select: { id: true } });
+  for (const category of saleCategories) await ensureDefaultPackagingForCategory(category.id);
 
   const userCount = await prisma.user.count();
   if (userCount > 0) return;

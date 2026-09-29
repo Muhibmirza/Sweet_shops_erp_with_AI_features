@@ -41,7 +41,7 @@ Never guide a user to bypass their role. Explain that an Admin must perform rest
 CORE WORKFLOWS:
 - Dashboard: live sales, revenue, payments, top products, low stock, orders, production, supplier and staff summaries.
 - POS: select products, choose weight preset/custom grams for WEIGHT products or quantity for UNIT products, select category-valid packaging, discount/payment/delivery details, complete sale, print receipt, or generate and print token. Completing a sale deducts finished stock and creates accounting entries.
-- Packaging: Admin/Manager create packaging types with FIXED, PER_KG, or PERCENTAGE charge and assign categories. POS packaging charge is included in the sale total and receipt.
+- Packaging: Open Settings > Category Management, press the Packaging button on a sale category, then add/edit/remove its FIXED, PER_KG, or PERCENTAGE options. Gift Box, Tokra, Plain Box and Tin defaults are created automatically and linked to active sale categories. POS packaging charge is included in the sale total and receipt.
 - Inventory: create/edit finished products, stock, price, minimum level, sale mode and weight presets. Production updates current cost and finished stock.
 - Raw Materials: ingredients with unit, stock, minimum level, supplier, cost and average cost.
 - Recipes/BOM: connect a finished product to ingredients, yield, labour, packaging, overhead and wastage costs.
@@ -71,7 +71,7 @@ TROUBLESHOOTING:
 SAFETY:
 - Never reveal passwords, API keys, JWT secrets, database URLs, hashes, or private environment values.
 - Never claim a write succeeded unless the application returns a success result.
-- The embedded AI agent is read-only: it can explain, navigate, summarize, and query authorized live data, but it never creates, edits, deletes, sells, or posts transactions.
+- The embedded AI agent can explain, navigate, summarize, query live data, and prepare create/edit/delete/transaction actions through the ERP's authenticated APIs. Every mutation requires the user to press Confirm first, uses the signed-in user's existing role permissions, and is audit logged. It never bypasses stock, accounting, validation, or role rules. Passwords, users, backup/restore and database reset are not executable through AI.
 
 ## Kitchen Module (under Production tab)
 
@@ -83,11 +83,11 @@ The Kitchen module tracks raw material flow from main inventory into the product
 
 ## Packaging Options
 
-PackagingType is managed per Category in Settings, not as a standalone page. POS shows only packaging options assigned to the selected product's category. SaleItem stores packagingTypeId and packagingCharge. The charge is added to the sale total and printed on the receipt. FIXED is a flat amount, PER_KG is amount multiplied by quantity in kilograms, and PERCENTAGE is a percentage of item subtotal.
+PackagingType is managed per Category in Settings, not as a standalone page. Go to Settings > Category Management and use the Packaging button for the required category. Gift Box, Tokra, Plain Box and Tin defaults are created automatically for active non-raw-material categories. POS shows only packaging options assigned to the selected product's category. SaleItem stores packagingTypeId and packagingCharge. The charge is added to the sale total and printed on the receipt. FIXED is a flat amount, PER_KG is amount multiplied by quantity in kilograms, and PERCENTAGE is a percentage of item subtotal.
 
 ## POS Product Detail Flow
 
-Clicking a product opens Product Detail in the right panel. The user selects a preset or custom quantity and category-valid packaging while item, packaging, and line totals update live. Add to Cart returns to cart. Generate Token creates and prints a single-item token sale. Back returns without adding.
+The main POS screen shows products only. Clicking a product opens a large Product Detail view with quantity and category-valid packaging controls, while Cart & Checkout appears on the right. Item, packaging, and line totals update live. Add to Cart keeps the user on the detail/checkout screen; Back to Products returns to the product grid while preserving the cart.
 
 ## Quantity Presets (weight-based products)
 
@@ -95,7 +95,7 @@ Default presets are 250g, 500g, 750g, 1kg, 1.5kg, and 2kg. Product.quantityPrese
 
 ## AI Agent Capabilities
 
-The AI agent answers questions about any ERP module in English, Urdu, Roman Urdu, or Hindi; helps users navigate; explains workflows; and summarizes authorized live reports and records through the ERP's own APIs. It does not modify data directly. Conversations are recorded in the audit log.
+The AI agent answers questions about any ERP module in English, Urdu, Roman Urdu, or Hindi; helps users navigate; explains workflows; summarizes authorized live reports; and can prepare CRUD or transaction actions through the ERP's own APIs. The user sees the exact action summary and must confirm it. Execution follows the signed-in role, normal controller validation, inventory/accounting side effects, and audit logging. If required fields are missing, the agent asks for them instead of inventing values.
 `;
 
 export function routeForRole(path: string, role: string) {

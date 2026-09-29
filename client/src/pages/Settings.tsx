@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, DownloadCloud, Edit, Trash2, Wifi } from 'lucide-react';
+import { Copy, DownloadCloud, Edit, Package, Trash2, Wifi } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
@@ -195,7 +195,8 @@ export default function Settings() {
         </div>
       </form>
       <section className="rounded-lg border bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-        <h2 className="mb-3 font-semibold">Category Management</h2>
+        <h2 className="font-semibold">Category &amp; Packaging Management</h2>
+        <p className="mb-3 mt-1 text-xs text-slate-500">Har sale category ke Packaging button se Gift Box, Tokra, Plain Box, Tin aur custom options manage karein.</p>
         <form onSubmit={categoryForm.handleSubmit((data) => createCategory.mutate(data))} className="mb-4 grid gap-3 sm:grid-cols-[1fr_160px_auto]">
           <input className="touch rounded-md border bg-transparent px-3 dark:border-slate-700" placeholder="Category name" {...categoryForm.register('name', { required: true })} />
           <select className="touch rounded-md border bg-transparent px-3 dark:border-slate-700" {...categoryForm.register('type')}>
@@ -212,6 +213,14 @@ export default function Settings() {
               </div>
               <div className="flex items-center gap-2">
                 <span className="rounded-full bg-[#f1e3cb] px-2.5 py-1 text-xs font-semibold text-[#0f615d]">{categoryTypeLabel(cat.type)}</span>
+                {cat.type !== 'RAW_MATERIAL' && canEditDelete(user?.role) && <button
+                  type="button"
+                  className="touch inline-flex items-center gap-1.5 rounded-md border border-[#dac197] px-2.5 text-xs font-semibold text-[#0f615d] hover:bg-[#fffaf0]"
+                  onClick={() => setCategoryToEdit(cat)}
+                  aria-label={`Manage packaging for ${cat.name}`}
+                >
+                  <Package size={15} /> Packaging
+                </button>}
                 {canEditDelete(user?.role) && <button
                   type="button"
                   className="touch grid place-items-center rounded-md border border-blue-200 text-blue-600 hover:bg-blue-50"

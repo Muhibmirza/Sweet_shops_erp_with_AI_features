@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import prisma from '../utils/prisma';
 import { authenticate, authorize } from '../middleware/auth.middleware';
+import { ensureDefaultPackagingForCategory } from '../services/bootstrapService';
 
 const router = Router();
 router.use(authenticate);
@@ -17,6 +18,7 @@ router.get('/', async (req, res) => {
 router.post('/', authorize('ADMIN'), async (req, res) => {
   const { name, type, description } = req.body;
   const cat = await prisma.category.create({ data: { name, type, description } });
+  await ensureDefaultPackagingForCategory(cat.id);
   res.status(201).json({ success: true, data: cat });
 });
 
