@@ -26,6 +26,10 @@ export const ERP_ROUTES: Record<string, { path: string; roles: string[]; aliases
 };
 
 export const ERP_KNOWLEDGE = `
+You are the Eastern Sweets ERP Help Assistant. You explain how to use this software in Urdu, Roman Urdu, Hindi, or English, matching the user's language. For a how-to question, answer the actual task with short numbered steps using the real screen and button names. Never respond to a how-to question with a generic role or permissions list. Explain restrictions only when they affect the requested task. Be specific and practical.
+
+Example: For "POS mai customer ko receipt kaise deni hai?", answer: 1. POS tab kholen aur product click karen. 2. Detail page par quantity aur packaging choose karen. 3. Add to Cart dabayen. 4. Right side Cart & Checkout mein payment select karke Complete Sale dabayen. 5. Print Receipt dabayen. Generate Token is an alternative checkout action that records the sale and prints a token slip.
+
 Eastern Sweets ERP is an offline-first desktop business system for The Eastern Sweets, Bakers & Nimco. Answer only about this ERP and its business workflows. Never invent records, credentials, totals, stock, prices, or permissions. When current data is needed, tell the user to open the relevant module or use an allowed agent action.
 
 LANGUAGE: Understand English, Urdu script, Roman Urdu, and Hindi. Reply in the user's language and vocabulary. Keep instructions short, numbered, and based on visible labels in the ERP.
@@ -109,9 +113,19 @@ export function localRouteFromText(text: string, role: string) {
 
 export function localHelpAnswer(text: string, role: string) {
   const normalized = text.toLowerCase();
-  const sections = ERP_KNOWLEDGE.split('\n').map((line) => line.trim()).filter(Boolean);
-  const keywords = normalized.split(/[^a-z0-9]+/).filter((word) => word.length > 3);
-  const matches = sections.filter((line) => keywords.some((word) => line.toLowerCase().includes(word))).slice(0, 4);
-  if (matches.length) return `Aap ke ${role} access ke mutabiq:\n${matches.map((line, index) => `${index + 1}. ${line.replace(/^- /, '')}`).join('\n')}`;
-  return 'Main Eastern Sweets ERP ke POS, inventory, packaging, kitchen, production, orders, customers, suppliers, HR, accounting, reports, settings aur printing workflows mein help kar sakta hoon. Apna ERP masla thora detail mein batayein.';
+  const faq = [
+    { keywords: ['receipt', 'print', 'slip', 'raseed'], answer: '1. POS mein product select karke Add to Cart dabayen. 2. Cart & Checkout mein Complete Sale dabayen. 3. Print Receipt dabayen. Desktop app default printer par slip print karegi.' },
+    { keywords: ['token', 'numberwala'], answer: '1. POS mein product detail par quantity/packaging choose karke Add to Cart dabayen. 2. Cart & Checkout mein Generate Token dabayen. 3. Token number confirm karke Print dabayen. Is action se sale record hoti hai aur token slip print hoti hai.' },
+    { keywords: ['pos', 'sale', 'billing', 'bechna', 'invoice'], answer: '1. POS tab kholen aur product click karen. 2. Detail page par grams/kg ya pieces mein quantity aur packaging choose karen. 3. Add to Cart dabayen. 4. Right side Cart & Checkout mein payment select karke Complete Sale dabayen. 5. Print Receipt dabayen.' },
+    { keywords: ['order', 'advance', 'booking'], answer: '1. Orders tab kholen aur naya order banayen. 2. Customer aur products select karen. 3. Quantity, delivery date aur advance amount bharen. 4. Save karen; order status isi tab mein track hota hai.' },
+    { keywords: ['attendance', 'present', 'absent', 'leave'], answer: '1. HR/Attendance kholen. 2. Date select karen; purani date bhi chun sakte hain. 3. Employee ka Present, Absent, Leave ya Half Day mark karke Save karen.' },
+    { keywords: ['salary', 'payroll', 'wages'], answer: '1. Payroll kholen. 2. Month/year aur employee select karen. 3. Attendance aur deductions check karen. 4. Salary generate karen, phir payslip print karen.' },
+    { keywords: ['stock', 'inventory', 'maal'], answer: '1. Inventory mein product dhoonden. 2. Product ke Add Stock/stock action mein quantity aur reason bharen. 3. Save karen. Raw materials ke liye Raw Materials tab mein Stock In/Out use karen.' },
+    { keywords: ['backup', 'data'], answer: '1. Settings > Backup Tools kholen. 2. Backup group/folder aur manual ya auto schedule choose karen. 3. Backup run karen. Restore se pehle sahi backup file verify karen.' },
+    { keywords: ['supplier', 'purchase', 'kharida'], answer: '1. Suppliers mein supplier select ya add karen. 2. Purchase Order banakar raw materials aur quantities bharen. 3. Save karen. Payment supplier detail mein Record Payment se enter karen.' },
+    { keywords: ['recipe', 'bom', 'production'], answer: '1. Production > Recipes/BOM mein product select karke ingredients aur unki units/quantities bharen. 2. Recipe save karen. 3. Production Orders mein order banayen. 4. Kitchen transfer ke baad completion par ingredients deduct aur finished stock add hota hai.' }
+  ];
+  const match = faq.find((item) => item.keywords.some((keyword) => normalized.includes(keyword)));
+  const prefix = 'AI key setup nahi hua — lekin main basic ERP questions ka jawab de sakta hoon.\n';
+  return prefix + (match?.answer || 'POS, receipt, token, orders, attendance, payroll, stock, backup, suppliers ya recipes ke baare mein poochhein.');
 }

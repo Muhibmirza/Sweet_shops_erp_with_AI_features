@@ -11,6 +11,7 @@ import { formatCurrency } from '../../utils/format';
 import { canEditDelete } from '../../utils/permissions';
 import { printElement } from '../../utils/print';
 import { ALL_UNITS } from '../../constants/units';
+import { convertUnit } from '../../utils/unitConversion';
 
 export default function RecipeManagement() {
   const toast = useUiStore((s) => s.toast);
@@ -32,13 +33,8 @@ export default function RecipeManagement() {
   const recipes = useQuery({ queryKey: ['recipes'], queryFn: () => unwrap<any[]>(api.get('/api/recipes')) });
   const products = useQuery({ queryKey: ['products-for-recipes'], queryFn: () => unwrap<any[]>(api.get('/api/products?limit=200')) });
   const materials = useQuery({ queryKey: ['raw-materials-for-recipes'], queryFn: () => unwrap<any[]>(api.get('/api/raw-materials')) });
-  const normalizedIngredientQuantity = (quantity: number, ingredientUnit?: string, materialUnit?: string) => {
-    const from = (ingredientUnit || '').toUpperCase();
-    const to = (materialUnit || '').toUpperCase();
-    if (from === 'GRAM' && to === 'KG') return quantity / 1000;
-    if (from === 'KG' && to === 'GRAM') return quantity * 1000;
-    return quantity;
-  };
+  const normalizedIngredientQuantity = (quantity: number, ingredientUnit?: string, materialUnit?: string) =>
+    convertUnit(quantity, ingredientUnit || '', materialUnit || ingredientUnit || '');
   const create = useMutation({
     mutationFn: () => unwrap(editingId ? api.put(`/api/recipes/${editingId}`, form) : api.post('/api/recipes', form)),
     onSuccess: (recipe) => {
@@ -155,7 +151,7 @@ export default function RecipeManagement() {
           {form.ingredients.map((item: any, index: number) => (
             <div className="grid gap-2 md:grid-cols-[1fr_120px_120px_44px]" key={index}>
               <select className="erp-input" value={item.rawMaterialId} onChange={(e) => setIngredient(index, 'rawMaterialId', e.target.value)}><option value="">Raw material</option>{(materials.data || []).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select>
-              <input className="erp-input" type="number" step="0.001" min="0" placeholder="Qty" value={item.quantity} onChange={(e) => setIngredient(index, 'quantity', e.target.value)} />
+              <div><input className="erp-input" type="number" step="0.001" min="0" placeholder="Qty" value={item.quantity} onChange={(e) => setIngredient(index, 'quantity', e.target.value)} />{item.quantity && (item.unit === 'GRAM' || item.unit === 'ML') && <p className="mt-1 text-xs text-slate-500">{item.quantity} {item.unit === 'GRAM' ? 'g' : 'ml'} = {convertUnit(Number(item.quantity), item.unit, item.unit === 'GRAM' ? 'KG' : 'LITRE')} {item.unit === 'GRAM' ? 'kg' : 'litre'}</p>}{item.rawMaterialId && (() => { const material = materials.data?.find((row: any) => row.id === item.rawMaterialId); return material ? <p className="mt-1 text-xs text-slate-500">Rate: {formatCurrency(Number(material.avgCost || material.costPerUnit || 0))} per {material.unit.toLowerCase()}</p> : null; })()}</div>
               <select className="erp-input" value={item.unit} onChange={(e) => setIngredient(index, 'unit', e.target.value)}>{ALL_UNITS.map((unit) => <option key={unit.value} value={unit.value}>{unit.value}</option>)}</select>
               <button className="btn-secondary" onClick={() => setForm((prev: any) => ({ ...prev, ingredients: prev.ingredients.filter((_: any, i: number) => i !== index) }))}><Trash2 size={18} /></button>
             </div>

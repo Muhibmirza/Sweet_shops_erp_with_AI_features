@@ -53,7 +53,11 @@ function check(actual,expected,label){assert.equal(actual,expected,label);count+
  for(const quantity of [-1,'NaN','Infinity','12bad',{},true]) check((await request('/products/missing/add-stock',opts(tokens.ADMIN,'POST',{quantity}))).response.status,400,'Numeric input blocked');
  const category=await request('/categories',opts(tokens.ADMIN,'POST',{name:'Security fixture',type:'FINISHED_GOOD'}));check(category.response.status,201,'Valid category write');
  const product=await request('/products',opts(tokens.ADMIN,'POST',{name:'Security fixture',categoryId:category.body.data.id,unit:'KG',sellingPrice:100,currentStock:10,currentCost:50}));check(product.response.status,201,'Valid product write');
- const sale=await request('/sales',opts(tokens.CASHIER,'POST',{items:[{productId:product.body.data.id,quantity:1,unitPrice:100}],paymentMethod:'CASH',cashReceived:100}));check(sale.response.status,201,'Valid cashier sale');
+ const giftBox=await prisma.packagingType.findFirst({where:{name:'Gift Box',categories:{some:{categoryId:category.body.data.id}}}});check(Boolean(giftBox),true,'Category packaging linked');
+ const sale=await request('/sales',opts(tokens.CASHIER,'POST',{items:[{productId:product.body.data.id,quantity:1,unitPrice:100,packagingTypeId:giftBox.id}],paymentMethod:'CASH',cashReceived:200}));check(sale.response.status,201,'Valid cashier sale');
+ check(sale.body.data.items[0].packagingCharge,100,'Packaging line charge');
+ check(sale.body.data.netAmount,200,'Packaging included in sale total');
+ const saleJournal=await prisma.journalEntry.findFirst({where:{referenceType:'SALE',referenceId:sale.body.data.id},include:{lines:{include:{account:true}}}});check(saleJournal.lines.find(line=>line.account.code==='3001').credit,200,'Packaging included in sales revenue journal');
  const after=await prisma.product.findUnique({where:{id:product.body.data.id}});check(after.currentStock,9,'Sale stock movement preserved');
  const staff=await request(`/settings/users/${users.CASHIER.id}`,opts(tokens.ADMIN,'PATCH',{role:'STAFF'}));check(staff.response.status,200,'Existing Staff option preserved');
  await prisma.user.update({where:{id:users.CASHIER.id},data:{role:'CASHIER'}});

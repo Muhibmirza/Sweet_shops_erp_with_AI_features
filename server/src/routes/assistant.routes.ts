@@ -5,6 +5,7 @@ import { localHelpAnswer, localRouteFromText } from '../ai/erpKnowledge';
 import { aiStatus, askErpAssistant, interpretErpDataQuestion, isLikelyLiveDataQuestion } from '../services/aiAssistant';
 import { queryErpData } from '../services/erpDataAssistant';
 import { executeErpAction, interpretErpMutation, signErpAction } from '../services/erpActionAssistant';
+import { localAgentAnswer } from '../services/localAgentActions';
 
 const router = Router();
 router.use(authenticate);
@@ -55,9 +56,15 @@ router.post('/chat', async (req: any, res) => {
     if (!clean.length) return res.status(400).json({ success: false, message: 'Message is required' });
     const prompt = clean[clean.length - 1].text;
     const configured = aiStatus().configured;
-    const result = configured
-      ? await answerWithLiveData(clean, req.user, String(req.body.currentPath || ''))
-      : { reply: localHelpAnswer(prompt, req.user.role), liveDataUsed: false };
+    let result;
+    try {
+      result = configured
+        ? await answerWithLiveData(clean, req.user, String(req.body.currentPath || ''))
+        : { reply: localHelpAnswer(prompt, req.user.role), liveDataUsed: false };
+    } catch (error: any) {
+      if (error?.status !== 429 && error?.status !== 502 && error?.status !== 503 && error?.status !== 504) throw error;
+      result = { reply: `AI service filhal available nahi hai.\n${localHelpAnswer(prompt, req.user.role)}`, liveDataUsed: false };
+    }
     await logConversation(req.user.id, prompt, result.reply, 'chat');
     res.json({ success: true, data: { ...result, configured } });
   } catch (error: any) {
@@ -70,7 +77,7 @@ router.post('/command', async (req: any, res) => {
     const text = String(req.body.text || '').trim();
     if (!text || text.length > 2000) return res.status(400).json({ success: false, message: 'A valid ERP question is required' });
     const route = localRouteFromText(text, req.user.role);
-    if (route && /open|khol|kholo|jao|show|dikha|le chalo|کھول|دکھا/i.test(text)) {
+    if (route && /\b(open|khol|kholo|jao|le chalo)\b|کھول/i.test(text)) {
       const reply = `${route.path} khol raha hoon.`;
       await logConversation(req.user.id, text, reply, 'agent');
       return res.json({ success: true, data: { reply, requiresConfirmation: false, action: { type: 'NAVIGATE', path: route.path } } });
@@ -89,7 +96,7 @@ router.post('/command', async (req: any, res) => {
     }
     const result = configured
       ? await answerWithLiveData([{ role: 'user', text }], req.user, String(req.body.currentPath || ''))
-      : { reply: localHelpAnswer(text, req.user.role), liveDataUsed: false };
+      : { reply: await localAgentAnswer(text, req.user), liveDataUsed: false };
     const reply = result.reply;
     await logConversation(req.user.id, text, reply, 'agent');
     res.json({ success: true, data: { reply, liveDataUsed: result.liveDataUsed, requiresConfirmation: false, action: null } });

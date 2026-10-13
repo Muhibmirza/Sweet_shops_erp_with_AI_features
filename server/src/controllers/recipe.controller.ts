@@ -2,14 +2,10 @@ import { publicError } from '../utils/publicError';
 import { Response } from 'express';
 import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
+import { convertUnit, displayQty } from '../utils/unitConversion';
 
-const normalizedIngredientQuantity = (quantity: number, ingredientUnit?: string | null, materialUnit?: string | null) => {
-  const from = (ingredientUnit || '').toUpperCase();
-  const to = (materialUnit || '').toUpperCase();
-  if (from === 'GRAM' && to === 'KG') return quantity / 1000;
-  if (from === 'KG' && to === 'GRAM') return quantity * 1000;
-  return quantity;
-};
+const normalizedIngredientQuantity = (quantity: number, ingredientUnit?: string | null, materialUnit?: string | null) =>
+  convertUnit(quantity, ingredientUnit || materialUnit || '', materialUnit || ingredientUnit || '');
 
 const ingredientCost = (quantity: number, ingredientUnit: string | null | undefined, rawMaterial: { unit?: string | null; avgCost?: number | null; costPerUnit?: number | null }) => {
   const rate = rawMaterial.avgCost || rawMaterial.costPerUnit || 0;
@@ -146,9 +142,11 @@ export const getRecipeCost = async (req: AuthRequest, res: Response) => {
       qty: item.quantity,
       unit: item.unit,
       requiredQty,
+      displayQty: displayQty(requiredQty, item.unit),
       costingQty,
       costingUnit: item.rawMaterial.unit,
       rate,
+      rateUnit: `per ${item.rawMaterial.unit.toLowerCase()}`,
       cost: materialCost,
       materialCost
     };

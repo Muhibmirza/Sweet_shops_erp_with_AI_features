@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '../utils/prisma';
 import { createKitchenConsumptionEntry, createKitchenTransferEntry } from '../services/journalService';
 import { publicError } from '../utils/publicError';
+import { convertUnit } from '../utils/unitConversion';
 
 const groupSums = async () => {
   const [transfers, consumptions, adjustments] = await Promise.all([
@@ -23,17 +24,6 @@ const getBalance = async (rawMaterialId: string) => {
     prisma.kitchenAdjustment.aggregate({ where: { rawMaterialId }, _sum: { quantity: true } })
   ]);
   return Number(a._sum.quantity || 0) - Number(b._sum.quantityDeducted || 0) + Number(c._sum.quantity || 0);
-};
-
-const convertUnit = (quantity: number, from: string, to: string) => {
-  const source = String(from || '').toUpperCase();
-  const target = String(to || '').toUpperCase();
-  if (source === target) return quantity;
-  if (source === 'GRAM' && target === 'KG') return quantity / 1000;
-  if (source === 'KG' && target === 'GRAM') return quantity * 1000;
-  if (source === 'ML' && target === 'LITRE') return quantity / 1000;
-  if (source === 'LITRE' && target === 'ML') return quantity * 1000;
-  return quantity;
 };
 
 const dateWhere = (query: any, field: string) => query.startDate || query.endDate ? {

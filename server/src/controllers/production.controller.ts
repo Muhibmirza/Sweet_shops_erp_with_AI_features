@@ -4,17 +4,7 @@ import dayjs from 'dayjs';
 import prisma from '../utils/prisma';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { createProductionEntry } from '../services/journalService';
-
-const convertUnit = (quantity: number, from: string, to: string) => {
-  const source = String(from || '').toUpperCase();
-  const target = String(to || '').toUpperCase();
-  if (source === target) return quantity;
-  if (source === 'GRAM' && target === 'KG') return quantity / 1000;
-  if (source === 'KG' && target === 'GRAM') return quantity * 1000;
-  if (source === 'ML' && target === 'LITRE') return quantity / 1000;
-  if (source === 'LITRE' && target === 'ML') return quantity * 1000;
-  return quantity;
-};
+import { convertUnit } from '../utils/unitConversion';
 
 const getKitchenBalance = async (rawMaterialId: string) => {
   const [transfers, consumptions, adjustments] = await Promise.all([

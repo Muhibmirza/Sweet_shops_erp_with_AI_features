@@ -22,7 +22,15 @@ async function main() {
   process.env.GROQ_API_KEY = 'smoke-test-key';
   process.env.GROQ_API_BASE_URL = `http://127.0.0.1:${server.address().port}/openai/v1`;
   const ai = require('../server/dist/services/aiAssistant.js');
+  const { localHelpAnswer } = require('../server/dist/ai/erpKnowledge.js');
   try {
+    const posHelp = localHelpAnswer('mujhe ye btao k pos mai order kese bnega customer ko receipt dene k lie', 'ADMIN');
+    assert.match(posHelp, /Complete Sale/);
+    assert.match(posHelp, /Print Receipt/);
+    assert.doesNotMatch(posHelp, /ADMIN access/);
+    const { convertUnit } = require('../server/dist/utils/unitConversion.js');
+    assert.equal(convertUnit(500, 'GRAM', 'KG'), 0.5);
+    assert.equal(convertUnit(750, 'ML', 'LITRE'), 0.75);
     assert.equal(ai.aiStatus().provider, 'groq');
     const plan = await ai.interpretErpDataQuestion('aaj kitni sale hui?', { role: 'ADMIN' });
     assert.equal(plan.intent, 'SALES_SUMMARY');
